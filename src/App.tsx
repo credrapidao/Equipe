@@ -51,6 +51,7 @@ import AdvanceManager from './components/AdvanceManager';
 import PaymentReport from './components/PaymentReport';
 import GoogleSheetsSync from './components/GoogleSheetsSync';
 import { EmployeeManager } from './components/EmployeeManager';
+import { LocalDataMigrator } from './components/LocalDataMigrator';
 
 export default function App() {
   const [user, setUser] = useState<any>(null);
@@ -620,7 +621,9 @@ export default function App() {
               transition={{ duration: 0.2 }}
             >
               {activeTab === 'dashboard' && (
-                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6 lg:gap-8">
+                <>
+                  <LocalDataMigrator existingPromoters={promoters} />
+                  <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6 lg:gap-8">
                   <StatCard 
                     label="Pendente Pagamento" 
                     value={formatCurrency(financialSummary.unpaidAmount)} 
@@ -663,6 +666,7 @@ export default function App() {
                     </div>
                   </div>
                 </div>
+                </>
               )}
 
               {activeTab === 'promoters' && (
