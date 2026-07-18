@@ -1,0 +1,118 @@
+{
+  "entities": {
+    "promoter": {
+      "title": "Promoter",
+      "description": "A person who promotes products or events.",
+      "type": "object",
+      "properties": {
+        "name": { "type": "string", "description": "Full name" },
+        "document": { "type": "string", "description": "CPF or RG" },
+        "pixKey": { "type": "string", "description": "Pix key" },
+        "pixKeyType": { "type": "string", "enum": ["CPF", "CNPJ", "Email", "Phone", "Random"] },
+        "phoneNumber": { "type": "string" },
+        "active": { "type": "boolean" },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["name", "document", "pixKey", "pixKeyType"]
+    },
+    "attendance": {
+      "title": "Attendance",
+      "description": "Daily record of a promoter's work.",
+      "type": "object",
+      "properties": {
+        "promoterId": { "type": "string" },
+        "date": { "type": "string", "format": "date" },
+        "status": { "type": "string", "enum": ["present", "absent", "half-day"] },
+        "paymentStatus": { "type": "string", "enum": ["pending", "paid"] },
+        "dailyRate": { "type": "number" },
+        "recordedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["promoterId", "date", "status", "paymentStatus", "dailyRate"]
+    },
+    "advance": {
+      "title": "Advance",
+      "description": "Payment advance for a promoter.",
+      "type": "object",
+      "properties": {
+        "promoterId": { "type": "string" },
+        "amount": { "type": "number" },
+        "date": { "type": "string", "format": "date" },
+        "status": { "type": "string", "enum": ["pending", "paid"] },
+        "notes": { "type": "string" }
+      },
+      "required": ["promoterId", "amount", "date", "status"]
+    },
+    "employee": {
+      "title": "Employee",
+      "description": "A monthly employee.",
+      "type": "object",
+      "properties": {
+        "name": { "type": "string", "description": "Full name" },
+        "document": { "type": "string", "description": "CPF or RG" },
+        "pixKey": { "type": "string", "description": "Pix key" },
+        "pixKeyType": { "type": "string", "enum": ["CPF", "CNPJ", "Email", "Phone", "Random"] },
+        "phoneNumber": { "type": "string" },
+        "baseSalary": { "type": "number" },
+        "active": { "type": "boolean" },
+        "team": { "type": "string", "enum": ["flash", "rapidao"] },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["name", "document", "pixKey", "pixKeyType", "baseSalary", "active"]
+    },
+    "employeeAbsence": {
+      "title": "EmployeeAbsence",
+      "description": "Absence record for an employee.",
+      "type": "object",
+      "properties": {
+        "employeeId": { "type": "string" },
+        "date": { "type": "string", "format": "date" },
+        "discount": { "type": "number" },
+        "reason": { "type": "string" },
+        "recordedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["employeeId", "date", "discount", "recordedAt"]
+    },
+    "employeeAdvance": {
+      "title": "EmployeeAdvance",
+      "description": "Advance payment for an employee.",
+      "type": "object",
+      "properties": {
+        "employeeId": { "type": "string" },
+        "amount": { "type": "number" },
+        "date": { "type": "string", "format": "date" },
+        "status": { "type": "string", "enum": ["pending", "paid"] },
+        "notes": { "type": "string" },
+        "recordedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["employeeId", "amount", "date", "status", "recordedAt"]
+    }
+  },
+  "firestore": {
+    "promoters": {
+      "schema": "promoter",
+      "description": "Promoters"
+    },
+    "promoters/{promoterId}/attendance": {
+      "schema": "attendance",
+      "description": "Attendance records"
+    },
+    "promoters/{promoterId}/advances": {
+      "schema": "advance",
+      "description": "Advances"
+    },
+    "employees": {
+      "schema": "employee",
+      "description": "Monthly Employees"
+    },
+    "employees/{employeeId}/absences": {
+      "schema": "employeeAbsence",
+      "description": "Absence records for employees"
+    },
+    "employees/{employeeId}/advances": {
+      "schema": "employeeAdvance",
+      "description": "Advances for employees"
+    }
+  }
+}

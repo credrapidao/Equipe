@@ -1,0 +1,6 @@
+{
+  "name": "Controle de Promotores",
+  "description": "Aplicativo para gestão de promotores e funcionários, controle de presença, faltas, adiantamentos e fechamento de folha de pagamento.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
