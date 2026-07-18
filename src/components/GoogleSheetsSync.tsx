@@ -88,9 +88,13 @@ export default function GoogleSheetsSync({
       }
     } catch (error: any) {
       console.error('Erro na conexão com o Google:', error);
+      let errorMsg = error.message || 'Verifique as permissões da janela pop-up.';
+      if (error.code === 'auth/unauthorized-domain' || (errorMsg && errorMsg.includes('unauthorized-domain'))) {
+        errorMsg = 'Domínio não autorizado no Firebase! Por favor, adicione o domínio do seu site Vercel nos "Domínios Autorizados" no console do Firebase (Authentication > Configurações > Domínios Autorizados).';
+      }
       setStatusMessage({
         type: 'error',
-        text: `Erro ao conectar: ${error.message || 'Verifique as permissões da janela pop-up.'}`
+        text: `Erro ao conectar: ${errorMsg}`
       });
     } finally {
       setIsConnecting(false);

@@ -101,14 +101,43 @@ export default function App() {
   useEffect(() => {
     const unsubscribe = onAuthStateChanged(auth, (firebaseUser) => {
       if (firebaseUser) {
-        setUser({
-          uid: firebaseUser.uid,
-          email: firebaseUser.email || '',
-          displayName: firebaseUser.displayName || firebaseUser.email || 'Usuário Google',
-          photoURL: firebaseUser.photoURL
-        });
-        setUserRole('admin'); // Default google users to admin
+        if (firebaseUser.isAnonymous) {
+          // If anonymous, retrieve actual user and role details from localStorage
+          const stored = localStorage.getItem('rapidaocred_session');
+          if (stored) {
+            try {
+              const parsed = JSON.parse(stored);
+              setUser(parsed.user);
+              setUserRole(parsed.role);
+            } catch {
+              setUser({
+                uid: 'admin-local',
+                displayName: 'Administrador',
+                email: 'admin@rapidao.com'
+              });
+              setUserRole('admin');
+            }
+          } else {
+            setUser({
+              uid: 'admin-local',
+              displayName: 'Administrador',
+              email: 'admin@rapidao.com'
+            });
+            setUserRole('admin');
+          }
+        } else {
+          // Real Google account login
+          setUser({
+            uid: firebaseUser.uid,
+            email: firebaseUser.email || '',
+            displayName: firebaseUser.displayName || firebaseUser.email || 'Usuário Google',
+            photoURL: firebaseUser.photoURL
+          });
+          setUserRole('admin'); // Default google users to admin
+        }
+        setLoading(false);
       } else {
+        // No firebase user is currently active
         // Check for local storage custom credential login
         const stored = localStorage.getItem('rapidaocred_session');
         if (stored) {
@@ -116,15 +145,22 @@ export default function App() {
             const parsed = JSON.parse(stored);
             setUser(parsed.user);
             setUserRole(parsed.role);
+            // Re-authenticate silently in the background so they can access Cloud Firestore
+            signInAnonymously(auth).catch(err => {
+              console.warn('Silent anonymous login failed on refresh:', err);
+              // Still let them through to the app (though Firestore might fail if rules strictly block)
+              setLoading(false);
+            });
           } catch {
             localStorage.removeItem('rapidaocred_session');
             setUser(null);
+            setLoading(false);
           }
         } else {
           setUser(null);
+          setLoading(false);
         }
       }
-      setLoading(false);
     });
     return () => unsubscribe();
   }, []);
@@ -196,10 +232,18 @@ export default function App() {
   }, [filteredAttendance, filteredAdvances]);
 
   const handleLogin = async () => {
+    setLoginError('');
     try {
       await signInWithPopup(auth, googleProvider);
-    } catch (error) {
+    } catch (error: any) {
       console.error("Login Error:", error);
+      let errorMsg = error.message || 'Erro ao realizar login.';
+      if (error.code === 'auth/unauthorized-domain' || (errorMsg && errorMsg.includes('unauthorized-domain'))) {
+        errorMsg = 'Domínio não autorizado no Firebase! Por favor, acione o console do seu Firebase (Authentication > Configurações > Domínios Autorizados) e adicione o domínio do seu site da Vercel para autorizar o login.';
+      } else if (error.code === 'auth/popup-closed-by-user') {
+        errorMsg = 'A janela de autenticação foi fechada antes de concluir o login.';
+      }
+      setLoginError(errorMsg);
     }
   };
 

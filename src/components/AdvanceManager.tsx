@@ -249,7 +249,7 @@ export default function AdvanceManager({ promoters, readOnly }: AdvanceManagerPr
 
   const copyIndividual = (e: React.MouseEvent, promoter: Promoter, amount: number) => {
     e.stopPropagation();
-    const text = `NOME: ${promoter.name}\nCPF: ${promoter.document}\nPIX: ${promoter.pixKey}\nVALOR: ${formatCurrency(amount)}`;
+    const text = `NOME: ${promoter.name}\nCPF: ${promoter.document}\nPIX (${promoter.pixKeyType}): ${promoter.pixKey}\nVALOR: ${formatCurrency(amount)}`;
     navigator.clipboard.writeText(text).then(() => {
       setCopiedId(promoter.id);
       setTimeout(() => setCopiedId(null), 2000);
@@ -447,7 +447,7 @@ export default function AdvanceManager({ promoters, readOnly }: AdvanceManagerPr
       .filter(p => selectedBalances.has(p.id))
       .map(p => ({ p, net: getPendingBalance(p.id) }))
       .filter(i => i.net > 0.01)
-      .map(i => `NOME: ${i.p.name}\nCPF: ${i.p.document}\nPIX: ${i.p.pixKey}\nVALOR: ${formatCurrency(i.net)}`)
+      .map(i => `NOME: ${i.p.name}\nCPF: ${i.p.document}\nPIX (${i.p.pixKeyType}): ${i.p.pixKey}\nVALOR: ${formatCurrency(i.net)}`)
       .join('\n\n---\n\n');
     
     if (list) {
@@ -546,7 +546,7 @@ export default function AdvanceManager({ promoters, readOnly }: AdvanceManagerPr
     const list = promoters
       .map(p => ({ p, net: getPendingBalance(p.id) }))
       .filter(i => i.net > 0.01)
-      .map(i => `NOME: ${i.p.name}\nCPF: ${i.p.document}\nPIX: ${i.p.pixKey}\nVALOR: ${formatCurrency(i.net)}`)
+      .map(i => `NOME: ${i.p.name}\nCPF: ${i.p.document}\nPIX (${i.p.pixKeyType}): ${i.p.pixKey}\nVALOR: ${formatCurrency(i.net)}`)
       .join('\n\n---\n\n');
     
     if (list) {
