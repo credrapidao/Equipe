@@ -12,9 +12,10 @@ import { EmployeeReport } from './EmployeeReport';
 
 interface EmployeeManagerProps {
   readOnly?: boolean;
+  userTeam?: 'all' | 'flash' | 'rapidao';
 }
 
-export function EmployeeManager({ readOnly }: EmployeeManagerProps = {}) {
+export function EmployeeManager({ readOnly, userTeam = 'all' }: EmployeeManagerProps) {
   const [employees, setEmployees] = useState<Employee[]>([]);
   const [allAbsences, setAllAbsences] = useState<EmployeeAbsence[]>([]);
   const [allAdvances, setAllAdvances] = useState<EmployeeAdvance[]>([]);
@@ -201,7 +202,8 @@ export function EmployeeManager({ readOnly }: EmployeeManagerProps = {}) {
             ) : (
               <div className="space-y-8">
                 {/* Table for Time Flash */}
-                <div className="bg-white rounded-2xl border border-zinc-100 shadow-sm overflow-hidden">
+                {(userTeam === 'all' || userTeam === 'flash') && (
+                  <div className="bg-white rounded-2xl border border-zinc-100 shadow-sm overflow-hidden">
                   <div className="p-5 border-b border-zinc-100 bg-zinc-50/50 flex justify-between items-center">
                     <h4 className="font-bold text-zinc-900 text-sm flex items-center gap-2">
                       <span className="text-indigo-600">⚡</span> Funcionários - Time Flash
@@ -281,9 +283,11 @@ export function EmployeeManager({ readOnly }: EmployeeManagerProps = {}) {
                     </table>
                   </div>
                 </div>
+              )}
 
                 {/* Table for Time Rapidão */}
-                <div className="bg-white rounded-2xl border border-zinc-100 shadow-sm overflow-hidden">
+                {(userTeam === 'all' || userTeam === 'rapidao') && (
+                  <div className="bg-white rounded-2xl border border-zinc-100 shadow-sm overflow-hidden">
                   <div className="p-5 border-b border-zinc-100 bg-zinc-50/50 flex justify-between items-center">
                     <h4 className="font-bold text-zinc-900 text-sm flex items-center gap-2">
                       <span className="text-amber-500">🚀</span> Funcionários - Time Rapidão
@@ -363,7 +367,8 @@ export function EmployeeManager({ readOnly }: EmployeeManagerProps = {}) {
                     </table>
                   </div>
                 </div>
-              </div>
+              )}
+            </div>
             )}
           </div>
         )}

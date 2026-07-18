@@ -70,6 +70,16 @@ export interface Advance {
   notes?: string;
 }
 
+export interface AppUser {
+  id: string;
+  username: string;
+  password?: string;
+  displayName: string;
+  role: 'admin' | 'viewer';
+  team: 'all' | 'flash' | 'rapidao';
+  createdAt?: any;
+}
+
 export enum OperationType {
   CREATE = 'create',
   UPDATE = 'update',

@@ -18,7 +18,8 @@ import {
   Menu,
   X,
   FileBarChart,
-  Briefcase
+  Briefcase,
+  UserCog
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { signInAnonymously } from 'firebase/auth';
@@ -38,9 +39,11 @@ import {
   updateDoc, 
   doc, 
   serverTimestamp,
-  orderBy
+  orderBy,
+  where,
+  getDocs
 } from 'firebase/firestore';
-import { Promoter, Attendance, Advance, OperationType } from './types';
+import { Promoter, Attendance, Advance, OperationType, AppUser } from './types';
 import { handleFirestoreError, formatDate, formatCurrency } from './lib/utils';
 
 // Components
@@ -52,6 +55,7 @@ import PaymentReport from './components/PaymentReport';
 import GoogleSheetsSync from './components/GoogleSheetsSync';
 import { EmployeeManager } from './components/EmployeeManager';
 import { LocalDataMigrator } from './components/LocalDataMigrator';
+import UserManager from './components/UserManager';
 
 export default function App() {
   const [user, setUser] = useState<any>(null);
@@ -64,13 +68,20 @@ export default function App() {
   const [promoters, setPromoters] = useState<Promoter[]>([]);
   const [allAttendance, setAllAttendance] = useState<Attendance[]>([]);
   const [allAdvances, setAllAdvances] = useState<Advance[]>([]);
-  const [activeTab, setActiveTab] = useState<'dashboard' | 'promoters' | 'attendance' | 'advances' | 'reports' | 'employees'>('dashboard');
+  const [activeTab, setActiveTab] = useState<'dashboard' | 'promoters' | 'attendance' | 'advances' | 'reports' | 'employees' | 'users'>('dashboard');
   const [isPromoterModalOpen, setIsPromoterModalOpen] = useState(false);
   const [editingPromoter, setEditingPromoter] = useState<Promoter | null>(null);
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
   const [showInactive, setShowInactive] = useState(false);
   const [selectedTeam, setSelectedTeam] = useState<'all' | 'flash' | 'rapidao'>('all');
   const [searchQuery, setSearchQuery] = useState('');
+
+  // Lock selectedTeam if user has a team restriction
+  useEffect(() => {
+    if (user && user.team && user.team !== 'all') {
+      setSelectedTeam(user.team);
+    }
+  }, [user]);
 
   const filteredPromoters = useMemo(() => {
     return promoters.filter(p => {
@@ -266,34 +277,53 @@ export default function App() {
     const cleanPass = password.trim();
 
     try {
-      if (cleanUser === 'admin' && cleanPass === 'admin123') {
-        const adminUser = { uid: 'admin-local', displayName: 'Administrador', email: 'admin@rapidao.com' };
-        localStorage.setItem('rapidaocred_session', JSON.stringify({ user: adminUser, role: 'admin' }));
-        
-        try {
-          await signInAnonymously(auth);
-        } catch (err) {
-          console.warn('Anonymous login failed, continuing offline:', err);
+      // 1. Sign in anonymously first to enable Firestore queries
+      await signInAnonymously(auth);
+
+      // 2. Query Firestore 'users' collection
+      const usersRef = collection(db, 'users');
+      const q = query(usersRef, where('username', '==', cleanUser));
+      const querySnapshot = await getDocs(q);
+
+      if (!querySnapshot.empty) {
+        const userDoc = querySnapshot.docs[0];
+        const userData = userDoc.data();
+
+        if (userData.password === cleanPass) {
+          const customUser = {
+            uid: userDoc.id,
+            displayName: userData.displayName || userData.username,
+            email: `${userData.username}@rapidao.com`,
+            team: userData.team || 'all'
+          };
+
+          localStorage.setItem('rapidaocred_session', JSON.stringify({
+            user: customUser,
+            role: userData.role || 'viewer'
+          }));
+
+          setUser(customUser);
+          setUserRole(userData.role || 'viewer');
+          setIsAuthenticating(false);
+          return;
         }
-        
+      }
+
+      // 3. Fallback to static accounts if not found in Firestore
+      if (cleanUser === 'admin' && cleanPass === 'admin123') {
+        const adminUser = { uid: 'admin-local', displayName: 'Administrador', email: 'admin@rapidao.com', team: 'all' };
+        localStorage.setItem('rapidaocred_session', JSON.stringify({ user: adminUser, role: 'admin' }));
         setUser(adminUser);
         setUserRole('admin');
       } else if ((cleanUser === 'visualizacao' || cleanUser === 'viewer' || cleanUser === 'view') && cleanPass === 'view123') {
-        const viewerUser = { uid: 'viewer-local', displayName: 'Visualizador', email: 'view@rapidao.com' };
+        const viewerUser = { uid: 'viewer-local', displayName: 'Visualizador', email: 'view@rapidao.com', team: 'all' };
         localStorage.setItem('rapidaocred_session', JSON.stringify({ user: viewerUser, role: 'viewer' }));
-        
-        try {
-          await signInAnonymously(auth);
-        } catch (err) {
-          console.warn('Anonymous login failed, continuing offline:', err);
-        }
-        
         setUser(viewerUser);
         setUserRole('viewer');
       } else {
         setLoginError('Usuário ou senha inválidos.');
       }
-    } catch (err) {
+    } catch (err: any) {
       console.error('Credential login error:', err);
       setLoginError('Erro técnico durante o login.');
     } finally {
@@ -506,6 +536,14 @@ export default function App() {
             label="Relatórios" 
             onClick={() => setActiveTab('reports')} 
           />
+          {userRole === 'admin' && (
+            <NavItem 
+              active={activeTab === 'users'} 
+              icon={<UserCog size={20} />} 
+              label="Usuários" 
+              onClick={() => setActiveTab('users')} 
+            />
+          )}
         </nav>
 
         <div className="p-4 border-t border-brand-accent/20">
@@ -570,6 +608,11 @@ export default function App() {
               <button onClick={() => { setActiveTab('reports'); setIsMobileMenuOpen(false); }} className={`flex w-full items-center gap-4 text-xl font-medium ${activeTab === 'reports' ? 'text-zinc-900' : 'text-zinc-400'}`}>
                 <FileBarChart size={24} /> Relatórios
               </button>
+              {userRole === 'admin' && (
+                <button onClick={() => { setActiveTab('users'); setIsMobileMenuOpen(false); }} className={`flex w-full items-center gap-4 text-xl font-medium ${activeTab === 'users' ? 'text-zinc-900' : 'text-zinc-400'}`}>
+                  <UserCog size={24} /> Usuários
+                </button>
+              )}
               <div className="pt-6 border-t border-zinc-100">
                 <button onClick={handleLogout} className="flex w-full items-center gap-4 text-xl font-medium text-zinc-400">
                   <LogOut size={24} /> Sair
@@ -592,6 +635,7 @@ export default function App() {
                 {activeTab === 'advances' && 'Adiantamentos'}
                 {activeTab === 'reports' && 'Relatórios Financeiros'}
                 {activeTab === 'employees' && 'Funcionários Mensalistas'}
+                {activeTab === 'users' && 'Controle de Usuários'}
               </h1>
               <div className="flex items-center gap-2 mt-1">
                 <p className="text-zinc-500 font-medium">
@@ -608,43 +652,49 @@ export default function App() {
             </div>
 
             {/* Segmented control for Team Filter */}
-            {activeTab !== 'employees' && (
-              <div className="flex bg-zinc-200/50 p-1 rounded-2xl w-fit border border-zinc-200 shadow-inner">
-                <button
-                  onClick={() => setSelectedTeam('all')}
-                  className={`px-4 py-2 rounded-xl font-bold text-xs uppercase tracking-wider transition-all flex items-center gap-1.5 ${
-                    selectedTeam === 'all'
-                      ? 'bg-white text-zinc-800 shadow-sm'
-                      : 'text-zinc-500 hover:text-zinc-800'
-                  }`}
-                >
-                  👥 Todos
-                </button>
-                <button
-                  onClick={() => setSelectedTeam('flash')}
-                  className={`px-4 py-2 rounded-xl font-bold text-xs uppercase tracking-wider transition-all flex items-center gap-1.5 ${
-                    selectedTeam === 'flash'
-                      ? 'bg-indigo-600 text-white shadow-sm'
-                      : 'text-zinc-500 hover:text-indigo-600'
-                  }`}
-                >
-                  ⚡ Time Flash
-                </button>
-                <button
-                  onClick={() => setSelectedTeam('rapidao')}
-                  className={`px-4 py-2 rounded-xl font-bold text-xs uppercase tracking-wider transition-all flex items-center gap-1.5 ${
-                    selectedTeam === 'rapidao'
-                      ? 'bg-amber-500 text-white shadow-sm'
-                      : 'text-zinc-500 hover:text-amber-600'
-                  }`}
-                >
-                  🚀 Time Rapidão
-                </button>
-              </div>
+            {activeTab !== 'employees' && activeTab !== 'users' && (
+              (!user?.team || user.team === 'all') ? (
+                <div className="flex bg-zinc-200/50 p-1 rounded-2xl w-fit border border-zinc-200 shadow-inner">
+                  <button
+                    onClick={() => setSelectedTeam('all')}
+                    className={`px-4 py-2 rounded-xl font-bold text-xs uppercase tracking-wider transition-all flex items-center gap-1.5 ${
+                      selectedTeam === 'all'
+                        ? 'bg-white text-zinc-800 shadow-sm'
+                        : 'text-zinc-500 hover:text-zinc-800'
+                    }`}
+                  >
+                    👥 Todos
+                  </button>
+                  <button
+                    onClick={() => setSelectedTeam('flash')}
+                    className={`px-4 py-2 rounded-xl font-bold text-xs uppercase tracking-wider transition-all flex items-center gap-1.5 ${
+                      selectedTeam === 'flash'
+                        ? 'bg-indigo-600 text-white shadow-sm'
+                        : 'text-zinc-500 hover:text-indigo-600'
+                    }`}
+                  >
+                    ⚡ Time Flash
+                  </button>
+                  <button
+                    onClick={() => setSelectedTeam('rapidao')}
+                    className={`px-4 py-2 rounded-xl font-bold text-xs uppercase tracking-wider transition-all flex items-center gap-1.5 ${
+                      selectedTeam === 'rapidao'
+                        ? 'bg-amber-500 text-white shadow-sm'
+                        : 'text-zinc-500 hover:text-amber-600'
+                    }`}
+                  >
+                    🚀 Time Rapidão
+                  </button>
+                </div>
+              ) : (
+                <div className="inline-flex items-center gap-2 px-4 py-2 rounded-2xl bg-white border border-zinc-200 text-zinc-700 font-bold text-sm shadow-sm select-none">
+                  {user.team === 'flash' ? '⚡ Time Flash' : '🚀 Time Rapidão'}
+                </div>
+              )
             )}
           </div>
 
-          {activeTab !== 'employees' && activeTab !== 'reports' && userRole !== 'viewer' && (
+          {activeTab !== 'employees' && activeTab !== 'reports' && activeTab !== 'users' && userRole !== 'viewer' && (
             <button 
               onClick={() => { setEditingPromoter(null); setIsPromoterModalOpen(true); }}
               className="inline-flex items-center justify-center gap-2 rounded-xl bg-brand-dark px-6 py-3 text-sm font-bold text-brand-lime transition-all hover:bg-brand-surface border border-brand-lime/20 shadow-xl shadow-brand-lime/10 active:scale-95 self-start lg:self-end"
@@ -785,7 +835,11 @@ export default function App() {
               )}
 
               {activeTab === 'employees' && (
-                <EmployeeManager readOnly={userRole === 'viewer'} />
+                <EmployeeManager readOnly={userRole === 'viewer'} userTeam={user?.team || 'all'} />
+              )}
+
+              {activeTab === 'users' && (
+                <UserManager readOnly={userRole === 'viewer'} />
               )}
             </motion.div>
           </AnimatePresence>

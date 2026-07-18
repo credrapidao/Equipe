@@ -55,6 +55,10 @@ service cloud.firestore {
       }
     }
 
+    match /users/{userId} {
+      allow read, write: if isAdmin();
+    }
+
     function isValidPromoter(data) {
       return data.keys().hasAll(['name', 'document', 'pixKey', 'pixKeyType']) &&
              data.name is string && data.name.size() > 0 && data.name.size() <= 200 &&
