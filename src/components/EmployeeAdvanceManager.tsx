@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useMemo } from 'react';
-import { Calendar, User, Trash2, Plus, AlertCircle, Coins, Search, Wallet } from 'lucide-react';
+import { Calendar, User, Trash2, Plus, AlertCircle, Coins, Search, Wallet, Copy, Check } from 'lucide-react';
 import { db } from '../lib/firebase';
 import { collection, addDoc, deleteDoc, doc, updateDoc } from 'firebase/firestore';
 import { Employee, EmployeeAdvance, OperationType } from '../types';
@@ -21,6 +21,8 @@ export function EmployeeAdvanceManager({ employees, allAdvances, readOnly }: Emp
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState<string | null>(null);
   const [searchQuery, setSearchQuery] = useState('');
+  const [copiedId, setCopiedId] = useState<string | null>(null);
+  const [copiedPending, setCopiedPending] = useState(false);
 
   const activeEmployees = useMemo(() => {
     return employees.filter(e => e.active);
@@ -92,6 +94,47 @@ export function EmployeeAdvanceManager({ employees, allAdvances, readOnly }: Emp
   const formatBRDate = (dateStr: string) => {
     const [year, month, day] = dateStr.split('-');
     return `${day}/${month}/${year}`;
+  };
+
+  const copyIndividualAdvance = (adv: EmployeeAdvance) => {
+    const emp = employees.find(e => e.id === adv.employeeId);
+    const name = emp?.name || getEmployeeName(adv.employeeId);
+    const doc = emp?.document ? `CPF: ${emp.document}` : 'CPF: Não informado';
+    const pix = emp?.pixKey ? `PIX (${emp.pixKeyType || 'Chave'}): ${emp.pixKey}` : 'PIX: Não informado';
+    const amount = new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(adv.amount);
+    const dateStr = formatBRDate(adv.date);
+    const noteStr = adv.notes ? `\nNota: ${adv.notes}` : '';
+
+    const text = `NOME: ${name}\n${doc}\n${pix}\nVALOR: ${amount}\nDATA: ${dateStr}${noteStr}`;
+
+    navigator.clipboard.writeText(text).then(() => {
+      setCopiedId(adv.id);
+      setTimeout(() => setCopiedId(null), 2000);
+    });
+  };
+
+  const copyPendingSummary = () => {
+    const pendingAdvances = filteredAdvances.filter(a => a.status === 'pending');
+    if (pendingAdvances.length === 0) {
+      alert('Nenhum adiantamento pendente na lista atual.');
+      return;
+    }
+
+    const list = pendingAdvances.map(adv => {
+      const emp = employees.find(e => e.id === adv.employeeId);
+      const name = emp?.name || getEmployeeName(adv.employeeId);
+      const doc = emp?.document ? `CPF: ${emp.document}` : 'CPF: N/I';
+      const pix = emp?.pixKey ? `PIX (${emp.pixKeyType || 'PIX'}): ${emp.pixKey}` : 'PIX: N/I';
+      const amount = new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(adv.amount);
+      return `• NOME: ${name}\n  ${doc}\n  ${pix}\n  VALOR: ${amount}\n  DATA: ${formatBRDate(adv.date)}`;
+    }).join('\n\n');
+
+    const text = `ADIANTAMENTOS PENDENTES DE FUNCIONÁRIOS:\n\n${list}`;
+
+    navigator.clipboard.writeText(text).then(() => {
+      setCopiedPending(true);
+      setTimeout(() => setCopiedPending(false), 2000);
+    });
   };
 
   // Filter advances
@@ -248,15 +291,30 @@ export function EmployeeAdvanceManager({ employees, allAdvances, readOnly }: Emp
             </p>
           </div>
           
-          <div className="relative w-full sm:w-64">
-            <input
-              type="text"
-              placeholder="Buscar por funcionário ou nota..."
-              value={searchQuery}
-              onChange={e => setSearchQuery(e.target.value)}
-              className="w-full pl-9 pr-4 py-2 text-xs bg-zinc-50 border border-zinc-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-indigo-500/10 focus:border-indigo-500 transition-all font-medium"
-            />
-            <Search size={14} className="absolute left-3 top-3 text-zinc-400" />
+          <div className="flex items-center gap-2 w-full sm:w-auto">
+            <button
+              onClick={copyPendingSummary}
+              className={`flex items-center gap-1.5 px-3 py-2 rounded-xl text-xs font-bold transition-all border shrink-0 ${
+                copiedPending 
+                  ? 'bg-green-50 text-green-700 border-green-200' 
+                  : 'bg-zinc-50 text-zinc-700 border-zinc-200 hover:bg-zinc-100 hover:text-indigo-600'
+              }`}
+              title="Copiar lista de adiantamentos pendentes"
+            >
+              {copiedPending ? <Check size={14} /> : <Copy size={14} />}
+              <span>{copiedPending ? 'Copiado!' : 'Copiar Pendentes'}</span>
+            </button>
+
+            <div className="relative w-full sm:w-64">
+              <input
+                type="text"
+                placeholder="Buscar por funcionário ou nota..."
+                value={searchQuery}
+                onChange={e => setSearchQuery(e.target.value)}
+                className="w-full pl-9 pr-4 py-2 text-xs bg-zinc-50 border border-zinc-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-indigo-500/10 focus:border-indigo-500 transition-all font-medium"
+              />
+              <Search size={14} className="absolute left-3 top-3 text-zinc-400" />
+            </div>
           </div>
         </div>
 
@@ -308,15 +366,28 @@ export function EmployeeAdvanceManager({ employees, allAdvances, readOnly }: Emp
                         </span>
                       )}
                     </div>
-                    {!readOnly && (
+                    <div className="flex items-center gap-2">
                       <button
-                        onClick={() => handleDelete(adv)}
-                        className="p-2 text-zinc-400 hover:text-red-600 hover:bg-red-50 rounded-xl transition-all"
-                        title="Excluir Registro"
+                        onClick={() => copyIndividualAdvance(adv)}
+                        className={`p-2 rounded-xl transition-all ${
+                          copiedId === adv.id 
+                            ? 'bg-green-50 text-green-600' 
+                            : 'text-zinc-400 hover:text-indigo-600 hover:bg-indigo-50'
+                        }`}
+                        title="Copiar dados do funcionário para PIX"
                       >
-                        <Trash2 size={16} />
+                        {copiedId === adv.id ? <Check size={16} /> : <Copy size={16} />}
                       </button>
-                    )}
+                      {!readOnly && (
+                        <button
+                          onClick={() => handleDelete(adv)}
+                          className="p-2 text-zinc-400 hover:text-red-600 hover:bg-red-50 rounded-xl transition-all"
+                          title="Excluir Registro"
+                        >
+                          <Trash2 size={16} />
+                        </button>
+                      )}
+                    </div>
                   </div>
                 </div>
               ))}

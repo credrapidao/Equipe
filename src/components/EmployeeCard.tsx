@@ -1,5 +1,5 @@
-import React from 'react';
-import { User, Phone, Edit, CheckCircle2, XCircle, Coins, Key } from 'lucide-react';
+import React, { useState } from 'react';
+import { User, Phone, Edit, CheckCircle2, XCircle, Coins, Key, Copy, Check } from 'lucide-react';
 import { Employee } from '../types';
 
 interface EmployeeCardProps {
@@ -9,8 +9,18 @@ interface EmployeeCardProps {
 }
 
 export function EmployeeCard({ employee, onEdit }: EmployeeCardProps) {
+  const [copied, setCopied] = useState(false);
+
   const formatCurrency = (val: number) => {
     return new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(val);
+  };
+
+  const handleCopy = () => {
+    const text = `NOME: ${employee.name}\nCPF: ${employee.document}\nPIX (${employee.pixKeyType}): ${employee.pixKey}\nSALÁRIO: ${formatCurrency(employee.baseSalary)}`;
+    navigator.clipboard.writeText(text).then(() => {
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2000);
+    });
   };
 
   return (
@@ -19,14 +29,25 @@ export function EmployeeCard({ employee, onEdit }: EmployeeCardProps) {
         ? 'border-zinc-100 hover:border-zinc-200 hover:shadow-xl hover:shadow-zinc-100/50' 
         : 'border-zinc-100 bg-zinc-50/50 opacity-75'
     }`}>
-      {/* Edit Trigger */}
-      <button 
-        onClick={() => onEdit(employee)}
-        className="absolute top-4 right-4 p-2 rounded-xl bg-zinc-50 text-zinc-400 opacity-0 group-hover:opacity-100 hover:text-indigo-600 hover:bg-indigo-50 transition-all duration-200"
-        title="Editar Funcionário"
-      >
-        <Edit size={16} />
-      </button>
+      {/* Action Buttons */}
+      <div className="absolute top-4 right-4 flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-all duration-200">
+        <button 
+          onClick={handleCopy}
+          className={`p-2 rounded-xl transition-all duration-200 ${
+            copied ? 'bg-green-50 text-green-600' : 'bg-zinc-50 text-zinc-400 hover:text-indigo-600 hover:bg-indigo-50'
+          }`}
+          title="Copiar dados do funcionário"
+        >
+          {copied ? <Check size={16} /> : <Copy size={16} />}
+        </button>
+        <button 
+          onClick={() => onEdit(employee)}
+          className="p-2 rounded-xl bg-zinc-50 text-zinc-400 hover:text-indigo-600 hover:bg-indigo-50 transition-all duration-200"
+          title="Editar Funcionário"
+        >
+          <Edit size={16} />
+        </button>
+      </div>
 
       {/* Main Details */}
       <div className="flex items-start gap-3.5">
