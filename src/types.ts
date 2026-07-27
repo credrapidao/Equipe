@@ -27,6 +27,8 @@ export interface Employee {
   baseSalary: number;
   active: boolean;
   team?: 'flash' | 'rapidao';
+  admissionDate?: string;
+  dismissalDate?: string;
   createdAt?: string;
   updatedAt?: string;
 }

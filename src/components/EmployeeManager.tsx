@@ -17,6 +17,13 @@ interface EmployeeManagerProps {
 
 export function EmployeeManager({ readOnly, userTeam = 'all' }: EmployeeManagerProps) {
   const [employees, setEmployees] = useState<Employee[]>([]);
+
+  const formatBRDate = (dateStr?: string) => {
+    if (!dateStr) return '-';
+    const [y, m, d] = dateStr.split('-');
+    if (!y || !m || !d) return dateStr;
+    return `${d}/${m}/${y}`;
+  };
   const [allAbsences, setAllAbsences] = useState<EmployeeAbsence[]>([]);
   const [allAdvances, setAllAdvances] = useState<EmployeeAdvance[]>([]);
   
@@ -221,6 +228,7 @@ export function EmployeeManager({ readOnly, userTeam = 'all' }: EmployeeManagerP
                           <th className="px-5 py-3.5">Celular</th>
                           <th className="px-5 py-3.5 text-right">Salário Base</th>
                           <th className="px-5 py-3.5">Pix</th>
+                          <th className="px-5 py-3.5">Admissão / Demissão</th>
                           <th className="px-5 py-3.5">Status</th>
                           <th className="px-5 py-3.5 text-center">Ações</th>
                         </tr>
@@ -228,7 +236,7 @@ export function EmployeeManager({ readOnly, userTeam = 'all' }: EmployeeManagerP
                       <tbody className="divide-y divide-zinc-100 text-xs text-zinc-600">
                         {flashEmployees.length === 0 ? (
                           <tr>
-                            <td colSpan={7} className="text-center py-8 text-zinc-400 font-bold">
+                            <td colSpan={8} className="text-center py-8 text-zinc-400 font-bold">
                               Nenhum funcionário cadastrado no Time Flash.
                             </td>
                           </tr>
@@ -248,6 +256,20 @@ export function EmployeeManager({ readOnly, userTeam = 'all' }: EmployeeManagerP
                                   </span>
                                   <span className="font-mono text-zinc-600 truncate max-w-[150px]" title={emp.pixKey}>{emp.pixKey}</span>
                                 </div>
+                              </td>
+                              <td className="px-5 py-3.5">
+                                {emp.admissionDate ? (
+                                  <div>
+                                    <span className="font-semibold text-zinc-700">{formatBRDate(emp.admissionDate)}</span>
+                                    {emp.dismissalDate && (
+                                      <span className="text-[10px] text-red-500 font-bold block">
+                                        Dem.: {formatBRDate(emp.dismissalDate)}
+                                      </span>
+                                    )}
+                                  </div>
+                                ) : (
+                                  <span className="text-zinc-400">-</span>
+                                )}
                               </td>
                               <td className="px-5 py-3.5">
                                 {emp.active ? (
@@ -305,6 +327,7 @@ export function EmployeeManager({ readOnly, userTeam = 'all' }: EmployeeManagerP
                           <th className="px-5 py-3.5">Celular</th>
                           <th className="px-5 py-3.5 text-right">Salário Base</th>
                           <th className="px-5 py-3.5">Pix</th>
+                          <th className="px-5 py-3.5">Admissão / Demissão</th>
                           <th className="px-5 py-3.5">Status</th>
                           <th className="px-5 py-3.5 text-center">Ações</th>
                         </tr>
@@ -312,7 +335,7 @@ export function EmployeeManager({ readOnly, userTeam = 'all' }: EmployeeManagerP
                       <tbody className="divide-y divide-zinc-100 text-xs text-zinc-600">
                         {rapidaoEmployees.length === 0 ? (
                           <tr>
-                            <td colSpan={7} className="text-center py-8 text-zinc-400 font-bold">
+                            <td colSpan={8} className="text-center py-8 text-zinc-400 font-bold">
                               Nenhum funcionário cadastrado no Time Rapidão.
                             </td>
                           </tr>
@@ -332,6 +355,20 @@ export function EmployeeManager({ readOnly, userTeam = 'all' }: EmployeeManagerP
                                   </span>
                                   <span className="font-mono text-zinc-600 truncate max-w-[150px]" title={emp.pixKey}>{emp.pixKey}</span>
                                 </div>
+                              </td>
+                              <td className="px-5 py-3.5">
+                                {emp.admissionDate ? (
+                                  <div>
+                                    <span className="font-semibold text-zinc-700">{formatBRDate(emp.admissionDate)}</span>
+                                    {emp.dismissalDate && (
+                                      <span className="text-[10px] text-red-500 font-bold block">
+                                        Dem.: {formatBRDate(emp.dismissalDate)}
+                                      </span>
+                                    )}
+                                  </div>
+                                ) : (
+                                  <span className="text-zinc-400">-</span>
+                                )}
                               </td>
                               <td className="px-5 py-3.5">
                                 {emp.active ? (

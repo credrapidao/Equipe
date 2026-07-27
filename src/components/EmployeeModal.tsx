@@ -20,7 +20,9 @@ export function EmployeeModal({ isOpen, onClose, editingEmployee }: EmployeeModa
     phoneNumber: '',
     baseSalary: 2000,
     active: true,
-    team: 'flash' as Employee['team']
+    team: 'flash' as Employee['team'],
+    admissionDate: '',
+    dismissalDate: ''
   });
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -35,7 +37,9 @@ export function EmployeeModal({ isOpen, onClose, editingEmployee }: EmployeeModa
         phoneNumber: editingEmployee.phoneNumber || '',
         baseSalary: editingEmployee.baseSalary || 2000,
         active: editingEmployee.active,
-        team: editingEmployee.team || 'flash'
+        team: editingEmployee.team || 'flash',
+        admissionDate: editingEmployee.admissionDate || '',
+        dismissalDate: editingEmployee.dismissalDate || ''
       });
     } else {
       setFormData({
@@ -46,7 +50,9 @@ export function EmployeeModal({ isOpen, onClose, editingEmployee }: EmployeeModa
         phoneNumber: '',
         baseSalary: 2000,
         active: true,
-        team: 'flash'
+        team: 'flash',
+        admissionDate: '',
+        dismissalDate: ''
       });
     }
   }, [editingEmployee, isOpen]);
@@ -75,6 +81,8 @@ export function EmployeeModal({ isOpen, onClose, editingEmployee }: EmployeeModa
         baseSalary: Number(formData.baseSalary) || 0,
         active: formData.active,
         team: formData.team || 'flash',
+        admissionDate: formData.admissionDate || '',
+        dismissalDate: formData.dismissalDate || '',
         updatedAt: new Date().toISOString()
       };
 
@@ -199,6 +207,29 @@ export function EmployeeModal({ isOpen, onClose, editingEmployee }: EmployeeModa
                   <option value="flash">⚡ Time Flash</option>
                   <option value="rapidao">🚀 Time Rapidão</option>
                 </select>
+              </div>
+            </div>
+
+            {/* Admission and Dismissal Dates */}
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+              <div className="space-y-1.5">
+                <label className="text-xs font-bold uppercase tracking-wider text-zinc-500">Data de Admissão</label>
+                <input 
+                  type="date"
+                  value={formData.admissionDate}
+                  onChange={e => setFormData({ ...formData, admissionDate: e.target.value })}
+                  className="w-full rounded-xl border border-zinc-200 bg-zinc-50 px-4 py-2.5 text-sm focus:border-indigo-500 focus:outline-none focus:ring-4 focus:ring-indigo-500/10 transition-all font-medium"
+                />
+              </div>
+
+              <div className="space-y-1.5">
+                <label className="text-xs font-bold uppercase tracking-wider text-zinc-500">Data de Demissão</label>
+                <input 
+                  type="date"
+                  value={formData.dismissalDate}
+                  onChange={e => setFormData({ ...formData, dismissalDate: e.target.value })}
+                  className="w-full rounded-xl border border-zinc-200 bg-zinc-50 px-4 py-2.5 text-sm focus:border-indigo-500 focus:outline-none focus:ring-4 focus:ring-indigo-500/10 transition-all font-medium"
+                />
               </div>
             </div>
 

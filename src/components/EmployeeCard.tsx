@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { User, Phone, Edit, CheckCircle2, XCircle, Coins, Key, Copy, Check } from 'lucide-react';
+import { User, Phone, Edit, CheckCircle2, XCircle, Coins, Key, Copy, Check, Calendar } from 'lucide-react';
 import { Employee } from '../types';
 
 interface EmployeeCardProps {
@@ -15,8 +15,21 @@ export function EmployeeCard({ employee, onEdit }: EmployeeCardProps) {
     return new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(val);
   };
 
+  const formatBRDate = (dateStr?: string) => {
+    if (!dateStr) return '';
+    const [y, m, d] = dateStr.split('-');
+    if (!y || !m || !d) return dateStr;
+    return `${d}/${m}/${y}`;
+  };
+
   const handleCopy = () => {
-    const text = `NOME: ${employee.name}\nCPF: ${employee.document}\nPIX (${employee.pixKeyType}): ${employee.pixKey}\nSALÁRIO: ${formatCurrency(employee.baseSalary)}`;
+    let text = `NOME: ${employee.name}\nCPF: ${employee.document}\nPIX (${employee.pixKeyType}): ${employee.pixKey}\nSALÁRIO: ${formatCurrency(employee.baseSalary)}`;
+    if (employee.admissionDate) {
+      text += `\nADMISSÃO: ${formatBRDate(employee.admissionDate)}`;
+    }
+    if (employee.dismissalDate) {
+      text += `\nDEMISSÃO: ${formatBRDate(employee.dismissalDate)}`;
+    }
     navigator.clipboard.writeText(text).then(() => {
       setCopied(true);
       setTimeout(() => setCopied(false), 2000);
@@ -83,6 +96,23 @@ export function EmployeeCard({ employee, onEdit }: EmployeeCardProps) {
             <span className="truncate">{employee.pixKey}</span>
           </div>
         </div>
+
+        {(employee.admissionDate || employee.dismissalDate) && (
+          <div className="col-span-2 space-y-1 border-t border-zinc-50 pt-2 flex items-center justify-between text-[11px]">
+            {employee.admissionDate && (
+              <span className="flex items-center gap-1 text-zinc-600 font-medium">
+                <Calendar size={12} className="text-indigo-500" />
+                <span className="text-[10px] uppercase font-bold text-zinc-400">Admissão:</span> {formatBRDate(employee.admissionDate)}
+              </span>
+            )}
+            {employee.dismissalDate && (
+              <span className="flex items-center gap-1 text-red-600 font-medium ml-auto">
+                <Calendar size={12} className="text-red-400" />
+                <span className="text-[10px] uppercase font-bold text-red-400">Demissão:</span> {formatBRDate(employee.dismissalDate)}
+              </span>
+            )}
+          </div>
+        )}
 
         {employee.phoneNumber && (
           <div className="col-span-2 space-y-0.5 border-t border-zinc-50 pt-2 flex items-center justify-between">
