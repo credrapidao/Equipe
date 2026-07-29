@@ -96,23 +96,61 @@ export default function AttendanceTracker({ promoters, readOnly }: AttendanceTra
     setSelectedDate(formatDate(current));
   };
 
+  const getDayOfWeek = (dateStr: string) => {
+    if (!dateStr) return '';
+    const [y, m, d] = dateStr.split('-').map(Number);
+    if (!y || !m || !d) return dateStr;
+    const date = new Date(y, m - 1, d);
+    const days = [
+      'Domingo', 
+      'Segunda-feira', 
+      'Terça-feira', 
+      'Quarta-feira', 
+      'Quinta-feira', 
+      'Sexta-feira', 
+      'Sábado'
+    ];
+    return days[date.getDay()];
+  };
+
   return (
     <div className="bg-white rounded-2xl border border-zinc-200 overflow-hidden shadow-sm">
       <div className="p-6 border-b border-zinc-100 flex flex-col sm:flex-row items-center justify-between gap-4">
-        <div className="flex items-center gap-2">
-          <Calendar className="text-zinc-400" size={20} />
-          <h2 className="font-bold text-zinc-900 tracking-tight">Registro de Presença e Controle Financeiro</h2>
+        <div className="flex items-center gap-3">
+          <div className="p-2.5 bg-zinc-100 rounded-xl text-zinc-600">
+            <Calendar size={20} />
+          </div>
+          <div>
+            <h2 className="font-bold text-zinc-900 tracking-tight">Registro de Presença e Controle Financeiro</h2>
+            <p className="text-xs font-bold text-indigo-600 mt-0.5">
+              {getDayOfWeek(selectedDate)}, {new Date(selectedDate + 'T00:00:00').toLocaleDateString('pt-BR', { day: '2-digit', month: 'long', year: 'numeric' })}
+            </p>
+          </div>
         </div>
         
-        <div className="flex items-center gap-1 bg-zinc-50 p-1 rounded-xl">
-          <button onClick={() => moveDate(-1)} className="p-1.5 hover:bg-white hover:shadow-sm rounded-lg text-zinc-600 transition-all">
-            <ChevronLeft size={20} />
-          </button>
-          <div className="px-4 py-1.5 text-sm font-bold text-zinc-900 tabular-nums min-w-[120px] text-center">
-            {new Date(selectedDate + 'T00:00:00').toLocaleDateString('pt-BR', { day: '2-digit', month: 'long', year: 'numeric' })}
+        <div className="flex items-center gap-2">
+          <div className="flex items-center gap-1 bg-zinc-50 p-1 rounded-xl border border-zinc-200">
+            <button onClick={() => moveDate(-1)} className="p-1.5 hover:bg-white hover:shadow-sm rounded-lg text-zinc-600 transition-all" title="Dia anterior">
+              <ChevronLeft size={20} />
+            </button>
+            <div className="px-2 py-1 text-sm font-extrabold text-zinc-900 tabular-nums flex items-center gap-1">
+              <input 
+                type="date"
+                value={selectedDate}
+                onChange={e => e.target.value && setSelectedDate(e.target.value)}
+                className="bg-transparent focus:outline-none cursor-pointer font-bold text-sm text-zinc-800"
+              />
+            </div>
+            <button onClick={() => moveDate(1)} className="p-1.5 hover:bg-white hover:shadow-sm rounded-lg text-zinc-600 transition-all" title="Próximo dia">
+              <ChevronRight size={20} />
+            </button>
           </div>
-          <button onClick={() => moveDate(1)} className="p-1.5 hover:bg-white hover:shadow-sm rounded-lg text-zinc-600 transition-all">
-            <ChevronRight size={20} />
+
+          <button
+            onClick={() => setSelectedDate(formatDate(new Date()))}
+            className="px-3 py-1.5 text-xs font-bold text-indigo-600 hover:bg-indigo-50 rounded-xl transition-colors border border-indigo-200"
+          >
+            Hoje
           </button>
         </div>
       </div>

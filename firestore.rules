@@ -28,6 +28,14 @@ service cloud.firestore {
         allow update: if isAdmin();
         allow delete: if isAdmin();
       }
+
+      match /leads/{leadId} {
+        allow read, write: if isAdmin();
+      }
+    }
+
+    match /leads/{leadId} {
+      allow read, write: if isAdmin();
     }
 
     match /config/{configId} {

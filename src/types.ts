@@ -72,6 +72,17 @@ export interface Advance {
   notes?: string;
 }
 
+export interface LeadRecord {
+  id: string;
+  promoterId: string;
+  date: string; // YYYY-MM-DD
+  count: number;
+  team?: 'flash' | 'rapidao';
+  notes?: string;
+  recordedAt?: string;
+  updatedAt?: string;
+}
+
 export interface AppUser {
   id: string;
   username: string;

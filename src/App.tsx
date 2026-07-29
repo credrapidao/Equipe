@@ -19,7 +19,8 @@ import {
   X,
   FileBarChart,
   Briefcase,
-  UserCog
+  UserCog,
+  Target
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { signInAnonymously } from 'firebase/auth';
@@ -50,6 +51,7 @@ import { handleFirestoreError, formatDate, formatCurrency } from './lib/utils';
 import PromoterCard from './components/PromoterCard';
 import PromoterModal from './components/PromoterModal';
 import AttendanceTracker from './components/AttendanceTracker';
+import LeadManager from './components/LeadManager';
 import AdvanceManager from './components/AdvanceManager';
 import PaymentReport from './components/PaymentReport';
 import GoogleSheetsSync from './components/GoogleSheetsSync';
@@ -68,7 +70,7 @@ export default function App() {
   const [promoters, setPromoters] = useState<Promoter[]>([]);
   const [allAttendance, setAllAttendance] = useState<Attendance[]>([]);
   const [allAdvances, setAllAdvances] = useState<Advance[]>([]);
-  const [activeTab, setActiveTab] = useState<'dashboard' | 'promoters' | 'attendance' | 'advances' | 'reports' | 'employees' | 'users'>('dashboard');
+  const [activeTab, setActiveTab] = useState<'dashboard' | 'promoters' | 'attendance' | 'leads' | 'advances' | 'reports' | 'employees' | 'users'>('dashboard');
   const [isPromoterModalOpen, setIsPromoterModalOpen] = useState(false);
   const [editingPromoter, setEditingPromoter] = useState<Promoter | null>(null);
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
@@ -519,6 +521,12 @@ export default function App() {
             onClick={() => setActiveTab('attendance')} 
           />
           <NavItem 
+            active={activeTab === 'leads'} 
+            icon={<Target size={20} />} 
+            label="Leads" 
+            onClick={() => setActiveTab('leads')} 
+          />
+          <NavItem 
             active={activeTab === 'advances'} 
             icon={<Wallet size={20} />} 
             label="Adiantamentos" 
@@ -599,6 +607,9 @@ export default function App() {
               <button onClick={() => { setActiveTab('attendance'); setIsMobileMenuOpen(false); }} className={`flex w-full items-center gap-4 text-xl font-medium ${activeTab === 'attendance' ? 'text-zinc-900' : 'text-zinc-400'}`}>
                 <CalendarDays size={24} /> Presença
               </button>
+              <button onClick={() => { setActiveTab('leads'); setIsMobileMenuOpen(false); }} className={`flex w-full items-center gap-4 text-xl font-medium ${activeTab === 'leads' ? 'text-zinc-900' : 'text-zinc-400'}`}>
+                <Target size={24} /> Leads
+              </button>
               <button onClick={() => { setActiveTab('advances'); setIsMobileMenuOpen(false); }} className={`flex w-full items-center gap-4 text-xl font-medium ${activeTab === 'advances' ? 'text-zinc-900' : 'text-zinc-400'}`}>
                 <Wallet size={24} /> Adiantamentos
               </button>
@@ -632,6 +643,7 @@ export default function App() {
                 {activeTab === 'dashboard' && 'Visão Geral'}
                 {activeTab === 'promoters' && 'Gerenciar Equipe'}
                 {activeTab === 'attendance' && 'Controle de Presença'}
+                {activeTab === 'leads' && 'Controle de Leads'}
                 {activeTab === 'advances' && 'Adiantamentos'}
                 {activeTab === 'reports' && 'Relatórios Financeiros'}
                 {activeTab === 'employees' && 'Funcionários Mensalistas'}
@@ -817,6 +829,15 @@ export default function App() {
 
               {activeTab === 'attendance' && (
                 <AttendanceTracker promoters={filteredPromoters} readOnly={userRole === 'viewer'} />
+              )}
+
+              {activeTab === 'leads' && (
+                <LeadManager 
+                  promoters={filteredPromoters} 
+                  allAttendance={filteredAttendance} 
+                  readOnly={userRole === 'viewer'} 
+                  selectedTeam={selectedTeam} 
+                />
               )}
 
               {activeTab === 'advances' && (
