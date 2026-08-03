@@ -311,12 +311,17 @@ export default function LeadManager({
     const totalFlashLeads = dailyRows.reduce((acc, r) => acc + r.flashLeads, 0);
     const totalRapidaoLeads = dailyRows.reduce((acc, r) => acc + r.rapidaoLeads, 0);
 
+    const sumFlashOperators = dailyRows.reduce((acc, r) => acc + r.flashPresent, 0);
+    const sumRapidaoOperators = dailyRows.reduce((acc, r) => acc + r.rapidaoPresent, 0);
     const sumOperators = dailyRows.reduce((acc, r) => acc + r.totalPresent, 0);
+
     const activeDaysCount = dailyRows.filter(r => r.totalLeads > 0 || r.totalPresent > 0).length || 1;
     
     const avgLeadsPerDay = totalPeriodLeads / activeDaysCount;
     const avgOperatorsPerDay = sumOperators / activeDaysCount;
     const avgLeadsPerOperator = sumOperators > 0 ? totalPeriodLeads / sumOperators : 0;
+    const avgFlashConversion = sumFlashOperators > 0 ? totalFlashLeads / sumFlashOperators : 0;
+    const avgRapidaoConversion = sumRapidaoOperators > 0 ? totalRapidaoLeads / sumRapidaoOperators : 0;
 
     return {
       startDateStr: formatBRDate(startStr),
@@ -325,9 +330,14 @@ export default function LeadManager({
       totalPeriodLeads,
       totalFlashLeads,
       totalRapidaoLeads,
+      sumOperators,
+      sumFlashOperators,
+      sumRapidaoOperators,
       avgLeadsPerDay,
       avgOperatorsPerDay,
-      avgLeadsPerOperator
+      avgLeadsPerOperator,
+      avgFlashConversion,
+      avgRapidaoConversion
     };
   }, [periodFilter, teamLeadsMap, allAttendance, promoters]);
 
@@ -338,19 +348,19 @@ export default function LeadManager({
 
     let text = `📊 RELATÓRIO DE LEADS POR EQUIPE - ${brDate} (${dayOfWeek})\n\n`;
     text += `⚡ TIME FLASH:\n`;
-    text += `• Operadores no dia: ${currentDayStats.flashPresent} op.\n`;
-    text += `• Total de Leads: ${currentDayStats.flashLeads}\n`;
-    text += `• Média: ${currentDayStats.avgFlash.toFixed(1)} leads/op.\n\n`;
+    text += `• Operadores: ${currentDayStats.flashPresent} op.\n`;
+    text += `• Total de Leads: ${currentDayStats.flashLeads} leads\n`;
+    text += `• Conversão: ${currentDayStats.avgFlash.toFixed(1)} leads/op.\n\n`;
 
     text += `🚀 TIME RAPIDÃO:\n`;
-    text += `• Operadores no dia: ${currentDayStats.rapidaoPresent} op.\n`;
-    text += `• Total de Leads: ${currentDayStats.rapidaoLeads}\n`;
-    text += `• Média: ${currentDayStats.avgRapidao.toFixed(1)} leads/op.\n\n`;
+    text += `• Operadores: ${currentDayStats.rapidaoPresent} op.\n`;
+    text += `• Total de Leads: ${currentDayStats.rapidaoLeads} leads\n`;
+    text += `• Conversão: ${currentDayStats.avgRapidao.toFixed(1)} leads/op.\n\n`;
 
     text += `📈 RESUMO GERAL:\n`;
     text += `• Total Operadores: ${currentDayStats.totalPresent} op.\n`;
     text += `• Total de Leads: ${currentDayStats.totalLeads} leads\n`;
-    text += `• Média Geral: ${currentDayStats.avgOverall.toFixed(1)} leads/op.\n`;
+    text += `• Conversão Geral: ${currentDayStats.avgOverall.toFixed(1)} leads/op.\n`;
 
     navigator.clipboard.writeText(text).then(() => {
       setCopiedDaily(true);
@@ -434,9 +444,14 @@ export default function LeadManager({
 
               <button
                 onClick={() => setSelectedDate(formatDate(new Date()))}
-                className="px-3 py-1.5 text-xs font-bold text-indigo-600 hover:bg-indigo-50 rounded-xl transition-colors border border-indigo-200"
+                className={`px-3 py-1.5 text-xs font-bold rounded-xl transition-all border ${
+                  selectedDate === formatDate(new Date())
+                    ? 'bg-indigo-600 text-white border-indigo-600 shadow-sm'
+                    : 'text-indigo-600 hover:bg-indigo-50 border-indigo-200'
+                }`}
+                title={selectedDate === formatDate(new Date()) ? 'Data de hoje selecionada' : 'Ir para a data de hoje'}
               >
-                Hoje
+                {selectedDate === formatDate(new Date()) ? 'Hoje' : 'Ir para Hoje'}
               </button>
             </div>
 
@@ -464,42 +479,51 @@ export default function LeadManager({
             <div className="bg-white p-5 rounded-2xl border border-zinc-200 shadow-sm flex items-center justify-between">
               <div>
                 <span className="text-[10px] font-extrabold uppercase tracking-widest text-zinc-400 block mb-1">
-                  Total de Leads no Dia
+                  Resumo Geral do Dia
                 </span>
-                <span className="text-3xl font-black text-zinc-900 tracking-tight">
-                  {currentDayStats.totalLeads}
+                <span className="text-3xl font-black text-zinc-900 tracking-tight block">
+                  {currentDayStats.totalLeads} <span className="text-sm font-bold text-zinc-500">leads</span>
+                </span>
+                <span className="text-xs font-semibold text-zinc-500 mt-1 block">
+                  {currentDayStats.totalPresent} op. | Média: <strong className="text-emerald-600">{currentDayStats.avgOverall.toFixed(1)}</strong> leads/op.
                 </span>
               </div>
-              <div className="p-3 bg-indigo-50 text-indigo-600 rounded-2xl">
+              <div className="p-3 bg-zinc-100 text-zinc-800 rounded-2xl shrink-0">
                 <Target size={22} />
               </div>
             </div>
 
-            <div className="bg-white p-5 rounded-2xl border border-zinc-200 shadow-sm flex items-center justify-between">
+            <div className="bg-white p-5 rounded-2xl border border-indigo-100 shadow-sm flex items-center justify-between">
               <div>
-                <span className="text-[10px] font-extrabold uppercase tracking-widest text-zinc-400 block mb-1">
-                  Total Operadores Presentes
+                <span className="text-[10px] font-extrabold uppercase tracking-widest text-indigo-500 block mb-1">
+                  Time Flash ⚡
                 </span>
-                <span className="text-3xl font-black text-emerald-600 tracking-tight">
-                  {currentDayStats.totalPresent}
+                <span className="text-3xl font-black text-indigo-600 tracking-tight block">
+                  {currentDayStats.flashLeads} <span className="text-sm font-bold text-indigo-400">leads</span>
+                </span>
+                <span className="text-xs font-semibold text-zinc-500 mt-1 block">
+                  {currentDayStats.flashPresent} op. | Conversão: <strong className="text-indigo-600">{currentDayStats.avgFlash.toFixed(1)}</strong> leads/op.
                 </span>
               </div>
-              <div className="p-3 bg-emerald-50 text-emerald-600 rounded-2xl">
-                <Users size={22} />
+              <div className="p-3 bg-indigo-50 text-indigo-600 rounded-2xl shrink-0">
+                <Zap size={22} />
               </div>
             </div>
 
-            <div className="bg-white p-5 rounded-2xl border border-zinc-200 shadow-sm flex items-center justify-between">
+            <div className="bg-white p-5 rounded-2xl border border-amber-100 shadow-sm flex items-center justify-between">
               <div>
-                <span className="text-[10px] font-extrabold uppercase tracking-widest text-zinc-400 block mb-1">
-                  Média Leads / Operador
+                <span className="text-[10px] font-extrabold uppercase tracking-widest text-amber-500 block mb-1">
+                  Time Rapidão 🚀
                 </span>
-                <span className="text-3xl font-black text-amber-600 tracking-tight">
-                  {currentDayStats.avgOverall.toFixed(1)}
+                <span className="text-3xl font-black text-amber-600 tracking-tight block">
+                  {currentDayStats.rapidaoLeads} <span className="text-sm font-bold text-amber-400">leads</span>
+                </span>
+                <span className="text-xs font-semibold text-zinc-500 mt-1 block">
+                  {currentDayStats.rapidaoPresent} op. | Conversão: <strong className="text-amber-600">{currentDayStats.avgRapidao.toFixed(1)}</strong> leads/op.
                 </span>
               </div>
-              <div className="p-3 bg-amber-50 text-amber-600 rounded-2xl">
-                <TrendingUp size={22} />
+              <div className="p-3 bg-amber-50 text-amber-600 rounded-2xl shrink-0">
+                <Rocket size={22} />
               </div>
             </div>
           </div>
@@ -525,23 +549,19 @@ export default function LeadManager({
                 </div>
 
                 {/* Team Info Metrics */}
-                <div className="grid grid-cols-2 gap-3 bg-zinc-50 p-4 rounded-xl border border-zinc-100">
+                <div className="grid grid-cols-3 gap-2 bg-indigo-50/70 p-3.5 rounded-xl border border-indigo-100 text-center">
                   <div>
-                    <span className="text-[10px] font-bold text-zinc-400 uppercase tracking-wider block">
-                      Operadores Presentes
-                    </span>
-                    <span className="text-lg font-black text-zinc-800 flex items-center gap-1 mt-0.5">
-                      <Users size={16} className="text-indigo-500" />
-                      {currentDayStats.flashPresent} op.
-                    </span>
+                    <span className="text-[10px] font-bold text-zinc-500 uppercase tracking-wider block">Operadores</span>
+                    <span className="text-base font-black text-indigo-950 mt-0.5 block">{currentDayStats.flashPresent} op.</span>
                   </div>
-
                   <div>
-                    <span className="text-[10px] font-bold text-zinc-400 uppercase tracking-wider block">
-                      Média / Operador
-                    </span>
-                    <span className="text-lg font-black text-indigo-600 mt-0.5 block">
-                      {currentDayStats.avgFlash.toFixed(1)} leads
+                    <span className="text-[10px] font-bold text-zinc-500 uppercase tracking-wider block">Total Leads</span>
+                    <span className="text-base font-black text-indigo-600 mt-0.5 block">{currentDayStats.flashLeads}</span>
+                  </div>
+                  <div>
+                    <span className="text-[10px] font-bold text-zinc-500 uppercase tracking-wider block">Conversão</span>
+                    <span className="text-base font-black text-indigo-700 mt-0.5 block">
+                      {currentDayStats.avgFlash.toFixed(1)} <span className="text-[10px] font-normal text-zinc-500">leads/op</span>
                     </span>
                   </div>
                 </div>
@@ -623,23 +643,19 @@ export default function LeadManager({
                 </div>
 
                 {/* Team Info Metrics */}
-                <div className="grid grid-cols-2 gap-3 bg-zinc-50 p-4 rounded-xl border border-zinc-100">
+                <div className="grid grid-cols-3 gap-2 bg-amber-50/70 p-3.5 rounded-xl border border-amber-100 text-center">
                   <div>
-                    <span className="text-[10px] font-bold text-zinc-400 uppercase tracking-wider block">
-                      Operadores Presentes
-                    </span>
-                    <span className="text-lg font-black text-zinc-800 flex items-center gap-1 mt-0.5">
-                      <Users size={16} className="text-amber-500" />
-                      {currentDayStats.rapidaoPresent} op.
-                    </span>
+                    <span className="text-[10px] font-bold text-zinc-500 uppercase tracking-wider block">Operadores</span>
+                    <span className="text-base font-black text-amber-950 mt-0.5 block">{currentDayStats.rapidaoPresent} op.</span>
                   </div>
-
                   <div>
-                    <span className="text-[10px] font-bold text-zinc-400 uppercase tracking-wider block">
-                      Média / Operador
-                    </span>
-                    <span className="text-lg font-black text-amber-600 mt-0.5 block">
-                      {currentDayStats.avgRapidao.toFixed(1)} leads
+                    <span className="text-[10px] font-bold text-zinc-500 uppercase tracking-wider block">Total Leads</span>
+                    <span className="text-base font-black text-amber-600 mt-0.5 block">{currentDayStats.rapidaoLeads}</span>
+                  </div>
+                  <div>
+                    <span className="text-[10px] font-bold text-zinc-500 uppercase tracking-wider block">Conversão</span>
+                    <span className="text-base font-black text-amber-700 mt-0.5 block">
+                      {currentDayStats.avgRapidao.toFixed(1)} <span className="text-[10px] font-normal text-zinc-500">leads/op</span>
                     </span>
                   </div>
                 </div>
@@ -750,56 +766,43 @@ export default function LeadManager({
           </div>
 
           {/* Period Summary Cards */}
-          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
-            <div className="bg-white p-5 rounded-2xl border border-zinc-200 shadow-sm">
-              <span className="text-[10px] font-extrabold uppercase tracking-widest text-zinc-400 block mb-1">
-                Total Leads no Período
-              </span>
-              <div className="text-3xl font-black text-zinc-900 tracking-tight">
-                {periodReport.totalPeriodLeads}
-              </div>
-              <span className="text-xs text-zinc-500 font-medium mt-1 block">
-                {periodReport.startDateStr} a {periodReport.endDateStr}
-              </span>
-            </div>
-
-            <div className="bg-white p-5 rounded-2xl border border-zinc-200 shadow-sm">
-              <span className="text-[10px] font-extrabold uppercase tracking-widest text-zinc-400 block mb-1">
-                Média Operadores / Dia
-              </span>
-              <div className="text-3xl font-black text-emerald-600 tracking-tight">
-                {periodReport.avgOperatorsPerDay.toFixed(1)}
-              </div>
-              <span className="text-xs text-zinc-500 font-medium mt-1 block">
-                Operadores trabalhando por dia
-              </span>
-            </div>
-
-            <div className="bg-white p-5 rounded-2xl border border-zinc-200 shadow-sm">
-              <span className="text-[10px] font-extrabold uppercase tracking-widest text-zinc-400 block mb-1">
-                Média Leads / Operador
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+            <div className="bg-white p-5 rounded-2xl border border-indigo-100 shadow-sm">
+              <span className="text-[10px] font-extrabold uppercase tracking-widest text-indigo-600 block mb-1">
+                Time Flash ⚡
               </span>
               <div className="text-3xl font-black text-indigo-600 tracking-tight">
-                {periodReport.avgLeadsPerOperator.toFixed(1)}
+                {periodReport.totalFlashLeads} <span className="text-sm font-bold text-indigo-400">leads</span>
               </div>
-              <span className="text-xs text-zinc-500 font-medium mt-1 block">
-                Captação média por operador
+              <div className="mt-2 text-xs font-semibold text-zinc-600 space-y-0.5 border-t border-zinc-100 pt-2">
+                <p>Operadores: <strong className="text-zinc-900">{periodReport.sumFlashOperators} op.</strong></p>
+                <p>Conversão Média: <strong className="text-indigo-600">{periodReport.avgFlashConversion.toFixed(1)} leads/op.</strong></p>
+              </div>
+            </div>
+
+            <div className="bg-white p-5 rounded-2xl border border-amber-100 shadow-sm">
+              <span className="text-[10px] font-extrabold uppercase tracking-widest text-amber-600 block mb-1">
+                Time Rapidão 🚀
               </span>
+              <div className="text-3xl font-black text-amber-600 tracking-tight">
+                {periodReport.totalRapidaoLeads} <span className="text-sm font-bold text-amber-400">leads</span>
+              </div>
+              <div className="mt-2 text-xs font-semibold text-zinc-600 space-y-0.5 border-t border-zinc-100 pt-2">
+                <p>Operadores: <strong className="text-zinc-900">{periodReport.sumRapidaoOperators} op.</strong></p>
+                <p>Conversão Média: <strong className="text-amber-600">{periodReport.avgRapidaoConversion.toFixed(1)} leads/op.</strong></p>
+              </div>
             </div>
 
             <div className="bg-white p-5 rounded-2xl border border-zinc-200 shadow-sm">
               <span className="text-[10px] font-extrabold uppercase tracking-widest text-zinc-400 block mb-1">
-                Divisão por Equipe
+                Total Geral do Período
               </span>
-              <div className="space-y-1 mt-1">
-                <div className="flex justify-between items-center text-xs font-bold text-indigo-600 bg-indigo-50 px-2.5 py-1 rounded-lg">
-                  <span>⚡ Flash:</span>
-                  <span>{periodReport.totalFlashLeads} leads</span>
-                </div>
-                <div className="flex justify-between items-center text-xs font-bold text-amber-600 bg-amber-50 px-2.5 py-1 rounded-lg">
-                  <span>🚀 Rapidão:</span>
-                  <span>{periodReport.totalRapidaoLeads} leads</span>
-                </div>
+              <div className="text-3xl font-black text-zinc-900 tracking-tight">
+                {periodReport.totalPeriodLeads} <span className="text-sm font-bold text-zinc-400">leads</span>
+              </div>
+              <div className="mt-2 text-xs font-semibold text-zinc-600 space-y-0.5 border-t border-zinc-100 pt-2">
+                <p>Total Operadores: <strong className="text-zinc-900">{periodReport.sumOperators} op.</strong></p>
+                <p>Conversão Geral: <strong className="text-emerald-600">{periodReport.avgLeadsPerOperator.toFixed(1)} leads/op.</strong></p>
               </div>
             </div>
           </div>
@@ -807,63 +810,71 @@ export default function LeadManager({
           {/* Detailed Daily Table */}
           <div className="bg-white rounded-2xl border border-zinc-200 overflow-hidden shadow-sm">
             <div className="p-5 border-b border-zinc-100">
-              <h3 className="font-bold text-base text-zinc-900">Relatório de Operadores e Leads por Equipe</h3>
-              <p className="text-xs text-zinc-500">Histórico diário contendo operadores presentes e captação de cada equipe</p>
+              <h3 className="font-bold text-base text-zinc-900">Relatório de Leads por Equipe</h3>
+              <p className="text-xs text-zinc-500">Histórico diário detalhando operadores, total de leads e conversão por equipe</p>
             </div>
 
             <div className="overflow-x-auto">
               <table className="w-full text-left border-collapse">
                 <thead>
                   <tr className="bg-zinc-50/80 border-b border-zinc-100 text-[11px] font-extrabold text-zinc-400 uppercase tracking-wider">
-                    <th className="px-5 py-3.5">Data / Dia da Semana</th>
-                    <th className="px-5 py-3.5 text-center">Op. Flash ⚡</th>
-                    <th className="px-5 py-3.5 text-center">Leads Flash ⚡</th>
-                    <th className="px-5 py-3.5 text-center">Op. Rapidão 🚀</th>
-                    <th className="px-5 py-3.5 text-center">Leads Rapidão 🚀</th>
-                    <th className="px-5 py-3.5 text-center">Total Operadores</th>
-                    <th className="px-5 py-3.5 text-center">Total Leads</th>
-                    <th className="px-5 py-3.5 text-center">Média Geral / Op.</th>
+                    <th className="px-4 py-3 text-left">Data / Dia</th>
+                    <th className="px-3 py-2 text-center bg-indigo-50/50 text-indigo-900 border-x border-indigo-100" colSpan={3}>Time Flash ⚡</th>
+                    <th className="px-3 py-2 text-center bg-amber-50/50 text-amber-900 border-x border-amber-100" colSpan={3}>Time Rapidão 🚀</th>
+                    <th className="px-3 py-2 text-center bg-zinc-100/60 text-zinc-900" colSpan={3}>Total Geral</th>
+                  </tr>
+                  <tr className="bg-zinc-50 border-b border-zinc-200 text-[10px] font-extrabold text-zinc-500 uppercase tracking-wider">
+                    <th className="px-4 py-2"></th>
+                    <th className="px-2 py-2 text-center bg-indigo-50/30 text-indigo-800">Op.</th>
+                    <th className="px-2 py-2 text-center bg-indigo-50/30 text-indigo-800">Leads</th>
+                    <th className="px-2 py-2 text-center bg-indigo-50/30 text-indigo-800 border-r border-indigo-100">Conversão</th>
+                    <th className="px-2 py-2 text-center bg-amber-50/30 text-amber-800">Op.</th>
+                    <th className="px-2 py-2 text-center bg-amber-50/30 text-amber-800">Leads</th>
+                    <th className="px-2 py-2 text-center bg-amber-50/30 text-amber-800 border-r border-amber-100">Conversão</th>
+                    <th className="px-2 py-2 text-center bg-zinc-50 text-zinc-800">Op.</th>
+                    <th className="px-2 py-2 text-center bg-zinc-50 text-zinc-900">Leads</th>
+                    <th className="px-2 py-2 text-center bg-zinc-50 text-emerald-700">Conversão</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-zinc-100 text-xs text-zinc-700">
                   {periodReport.dailyRows.length === 0 ? (
                     <tr>
-                      <td colSpan={8} className="text-center py-8 text-zinc-400 font-bold">
+                      <td colSpan={10} className="text-center py-8 text-zinc-400 font-bold">
                         Nenhum registro encontrado para o período.
                       </td>
                     </tr>
                   ) : (
                     periodReport.dailyRows.map(row => {
-                      const avgOp = row.totalPresent > 0 ? (row.totalLeads / row.totalPresent).toFixed(1) : '0.0';
+                      const flashConv = row.flashPresent > 0 ? (row.flashLeads / row.flashPresent).toFixed(1) : '0.0';
+                      const rapidaoConv = row.rapidaoPresent > 0 ? (row.rapidaoLeads / row.rapidaoPresent).toFixed(1) : '0.0';
+                      const totalConv = row.totalPresent > 0 ? (row.totalLeads / row.totalPresent).toFixed(1) : '0.0';
 
                       return (
                         <tr key={row.date} className="hover:bg-zinc-50/80 transition-colors">
-                          <td className="px-5 py-3.5">
+                          <td className="px-4 py-3">
                             <span className="font-bold text-zinc-900 block">{formatBRDate(row.date)}</span>
                             <span className="text-[10px] font-semibold text-zinc-400 uppercase tracking-wider">{row.dayOfWeek}</span>
                           </td>
-                          <td className="px-5 py-3.5 text-center font-semibold text-indigo-700">
-                            {row.flashPresent} op.
+                          
+                          {/* Flash */}
+                          <td className="px-2 py-3 text-center font-bold text-indigo-950 bg-indigo-50/20">{row.flashPresent} op.</td>
+                          <td className="px-2 py-3 text-center font-black text-indigo-600 bg-indigo-50/40">{row.flashLeads}</td>
+                          <td className="px-2 py-3 text-center font-bold text-indigo-800 bg-indigo-50/20 border-r border-indigo-100/60">
+                            {flashConv} <span className="text-[9px] text-zinc-400 font-normal">/op</span>
                           </td>
-                          <td className="px-5 py-3.5 text-center font-black text-indigo-600 bg-indigo-50/50">
-                            {row.flashLeads}
+
+                          {/* Rapidão */}
+                          <td className="px-2 py-3 text-center font-bold text-amber-950 bg-amber-50/20">{row.rapidaoPresent} op.</td>
+                          <td className="px-2 py-3 text-center font-black text-amber-600 bg-amber-50/40">{row.rapidaoLeads}</td>
+                          <td className="px-2 py-3 text-center font-bold text-amber-800 bg-amber-50/20 border-r border-amber-100/60">
+                            {rapidaoConv} <span className="text-[9px] text-zinc-400 font-normal">/op</span>
                           </td>
-                          <td className="px-5 py-3.5 text-center font-semibold text-amber-700">
-                            {row.rapidaoPresent} op.
-                          </td>
-                          <td className="px-5 py-3.5 text-center font-black text-amber-600 bg-amber-50/50">
-                            {row.rapidaoLeads}
-                          </td>
-                          <td className="px-5 py-3.5 text-center font-extrabold text-zinc-800">
-                            {row.totalPresent} op.
-                          </td>
-                          <td className="px-5 py-3.5 text-center font-black text-sm text-zinc-900">
-                            {row.totalLeads}
-                          </td>
-                          <td className="px-5 py-3.5 text-center">
-                            <span className="font-extrabold text-indigo-600 bg-indigo-50 px-2.5 py-1 rounded-lg">
-                              {avgOp}
-                            </span>
+
+                          {/* Total */}
+                          <td className="px-2 py-3 text-center font-extrabold text-zinc-800">{row.totalPresent} op.</td>
+                          <td className="px-2 py-3 text-center font-black text-zinc-900 text-sm">{row.totalLeads}</td>
+                          <td className="px-2 py-3 text-center font-black text-emerald-600">
+                            {totalConv} <span className="text-[9px] text-zinc-400 font-normal">/op</span>
                           </td>
                         </tr>
                       );

@@ -148,9 +148,14 @@ export default function AttendanceTracker({ promoters, readOnly }: AttendanceTra
 
           <button
             onClick={() => setSelectedDate(formatDate(new Date()))}
-            className="px-3 py-1.5 text-xs font-bold text-indigo-600 hover:bg-indigo-50 rounded-xl transition-colors border border-indigo-200"
+            className={`px-3 py-1.5 text-xs font-bold rounded-xl transition-all border ${
+              selectedDate === formatDate(new Date())
+                ? 'bg-indigo-600 text-white border-indigo-600 shadow-sm'
+                : 'text-indigo-600 hover:bg-indigo-50 border-indigo-200'
+            }`}
+            title={selectedDate === formatDate(new Date()) ? 'Data de hoje selecionada' : 'Ir para a data de hoje'}
           >
-            Hoje
+            {selectedDate === formatDate(new Date()) ? 'Hoje' : 'Ir para Hoje'}
           </button>
         </div>
       </div>

@@ -202,7 +202,7 @@ export default function App() {
       // Attendance
       const attendanceQ = query(collection(db, `promoters/${p.id}/attendance`));
       const unsubAttendance = onSnapshot(attendanceQ, (snapshot) => {
-        const data = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as Attendance));
+        const data = snapshot.docs.map(doc => ({ ...doc.data(), id: doc.id, promoterId: doc.data().promoterId || p.id } as Attendance));
         setAllAttendance(prev => {
           const others = prev.filter(a => a.promoterId !== p.id);
           return [...others, ...data];
@@ -213,7 +213,7 @@ export default function App() {
       // Advances
       const advancesQ = query(collection(db, `promoters/${p.id}/advances`));
       const unsubAdvances = onSnapshot(advancesQ, (snapshot) => {
-        const data = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as Advance));
+        const data = snapshot.docs.map(doc => ({ ...doc.data(), id: doc.id, promoterId: doc.data().promoterId || p.id } as Advance));
         setAllAdvances(prev => {
           const others = prev.filter(a => a.promoterId !== p.id);
           return [...others, ...data];
@@ -833,8 +833,8 @@ export default function App() {
 
               {activeTab === 'leads' && (
                 <LeadManager 
-                  promoters={filteredPromoters} 
-                  allAttendance={filteredAttendance} 
+                  promoters={promoters} 
+                  allAttendance={allAttendance} 
                   readOnly={userRole === 'viewer'} 
                   selectedTeam={selectedTeam} 
                 />
