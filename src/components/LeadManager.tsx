@@ -109,6 +109,14 @@ export default function LeadManager({
     return () => unsubscribe();
   }, []);
 
+  const isSunday = (dateStr: string) => {
+    if (!dateStr) return false;
+    const [y, m, d] = dateStr.split('-').map(Number);
+    if (!y || !m || !d) return false;
+    const date = new Date(y, m - 1, d);
+    return date.getDay() === 0;
+  };
+
   // Helper for day of the week in Portuguese
   const getDayOfWeek = (dateStr: string) => {
     if (!dateStr) return '';
@@ -242,26 +250,28 @@ export default function LeadManager({
       totalPresent: number;
     }> = {};
 
-    // Generate date range
+    // Generate date range (excluding Sundays - Segunda a Sábado)
     const curr = new Date(startDate);
     while (curr <= today) {
       const dStr = formatDate(curr);
-      datesMap[dStr] = {
-        date: dStr,
-        dayOfWeek: getDayOfWeek(dStr),
-        flashLeads: 0,
-        rapidaoLeads: 0,
-        totalLeads: 0,
-        flashPresent: 0,
-        rapidaoPresent: 0,
-        totalPresent: 0
-      };
+      if (!isSunday(dStr)) {
+        datesMap[dStr] = {
+          date: dStr,
+          dayOfWeek: getDayOfWeek(dStr),
+          flashLeads: 0,
+          rapidaoLeads: 0,
+          totalLeads: 0,
+          flashPresent: 0,
+          rapidaoPresent: 0,
+          totalPresent: 0
+        };
+      }
       curr.setDate(curr.getDate() + 1);
     }
 
-    // Populate operators present
+    // Populate operators present (excluding Sundays)
     allAttendance.forEach(att => {
-      if (att.date >= startStr && att.date <= endStr && (att.status === 'present' || att.status === 'half-day')) {
+      if (att.date >= startStr && att.date <= endStr && !isSunday(att.date) && (att.status === 'present' || att.status === 'half-day')) {
         if (!datesMap[att.date]) {
           datesMap[att.date] = {
             date: att.date,
@@ -282,9 +292,9 @@ export default function LeadManager({
       }
     });
 
-    // Populate team leads
+    // Populate team leads (excluding Sundays)
     Object.keys(teamLeadsMap).forEach(dStr => {
-      if (dStr >= startStr && dStr <= endStr) {
+      if (dStr >= startStr && dStr <= endStr && !isSunday(dStr)) {
         if (!datesMap[dStr]) {
           datesMap[dStr] = {
             date: dStr,
@@ -304,7 +314,9 @@ export default function LeadManager({
       }
     });
 
-    const dailyRows = Object.values(datesMap).sort((a, b) => b.date.localeCompare(a.date));
+    const dailyRows = Object.values(datesMap)
+      .filter(r => !isSunday(r.date))
+      .sort((a, b) => b.date.localeCompare(a.date));
 
     // Totals
     const totalPeriodLeads = dailyRows.reduce((acc, r) => acc + r.totalLeads, 0);

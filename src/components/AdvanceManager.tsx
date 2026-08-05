@@ -49,12 +49,26 @@ export default function AdvanceManager({ promoters, readOnly }: AdvanceManagerPr
     const totalPendingAdvances = (advancesMap[promoterId] || [])
       .filter(a => a.status === 'pending')
       .reduce((sum, a) => sum + a.amount, 0);
-    return Math.max(0, Math.round((totalAttendance - totalPendingAdvances) * 100) / 100);
+    const totalPaidAdvances = (advancesMap[promoterId] || [])
+      .filter(a => a.status === 'paid')
+      .reduce((sum, a) => sum + a.amount, 0);
+    return Math.max(0, Math.round((totalAttendance - totalPendingAdvances - totalPaidAdvances) * 100) / 100);
   };
 
   const getTotalPaid = (promoterId: string) => {
     return (advancesMap[promoterId] || [])
       .filter(a => a.status === 'paid')
+      .reduce((sum, a) => sum + a.amount, 0);
+  };
+
+  const getWeeklyTotalPaid = (promoterId: string) => {
+    const now = new Date();
+    const currentWeekStart = new Date(now);
+    currentWeekStart.setDate(now.getDate() - now.getDay());
+    currentWeekStart.setHours(0, 0, 0, 0);
+
+    return (advancesMap[promoterId] || [])
+      .filter(a => a.status === 'paid' && new Date(a.date + 'T12:00:00') >= currentWeekStart)
       .reduce((sum, a) => sum + a.amount, 0);
   };
 
@@ -808,9 +822,11 @@ export default function AdvanceManager({ promoters, readOnly }: AdvanceManagerPr
                                 <span>CPF: {item.promoter?.document} • PIX: {item.promoter?.pixKey}</span>
                               )}
                             </div>
-                            <div className="text-[9px] text-emerald-600 font-black bg-emerald-50 border border-emerald-100 px-2 py-0.5 rounded-lg w-fit mt-1 shadow-sm uppercase tracking-wider">
-                              Já Recebeu: {formatCurrency(getTotalPaid(item.promoterId))}
-                            </div>
+                            {getWeeklyTotalPaid(item.promoterId) > 0 && (
+                              <div className="text-[9px] text-emerald-600 font-black bg-emerald-50 border border-emerald-100 px-2 py-0.5 rounded-lg w-fit mt-1 shadow-sm uppercase tracking-wider">
+                                Já Recebeu: {formatCurrency(getWeeklyTotalPaid(item.promoterId))}
+                              </div>
+                            )}
                           </div>
                         </div>
                       </td>

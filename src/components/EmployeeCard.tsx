@@ -23,7 +23,10 @@ export function EmployeeCard({ employee, onEdit }: EmployeeCardProps) {
   };
 
   const handleCopy = () => {
-    let text = `NOME: ${employee.name}\nCPF: ${employee.document}\nPIX (${employee.pixKeyType}): ${employee.pixKey}\nSALÁRIO: ${formatCurrency(employee.baseSalary)}`;
+    let text = `NOME: ${employee.name}`;
+    if (employee.role) text += `\nFUNÇÃO: ${employee.role}`;
+    if (employee.level) text += `\nNÍVEL: ${employee.level}`;
+    text += `\nCPF: ${employee.document}\nPIX (${employee.pixKeyType}): ${employee.pixKey}\nSALÁRIO: ${formatCurrency(employee.baseSalary)}`;
     if (employee.admissionDate) {
       text += `\nADMISSÃO: ${formatBRDate(employee.admissionDate)}`;
     }
@@ -73,6 +76,17 @@ export function EmployeeCard({ employee, onEdit }: EmployeeCardProps) {
           <h4 className="font-bold text-zinc-950 tracking-tight text-sm leading-tight pr-6 group-hover:text-indigo-600 transition-colors">
             {employee.name}
           </h4>
+          {(employee.role || employee.level) && (
+            <div className="flex items-center gap-1.5 flex-wrap text-xs font-bold text-indigo-700">
+              {employee.role && <span>{employee.role}</span>}
+              {employee.role && employee.level && <span className="text-zinc-300">•</span>}
+              {employee.level && (
+                <span className="bg-indigo-50 border border-indigo-100 text-indigo-700 px-1.5 py-0.5 rounded text-[10px] uppercase font-extrabold">
+                  {employee.level}
+                </span>
+              )}
+            </div>
+          )}
           <p className="text-xs font-semibold text-zinc-400 tracking-wider uppercase">
             CPF: {employee.document}
           </p>
@@ -140,7 +154,11 @@ export function EmployeeCard({ employee, onEdit }: EmployeeCardProps) {
             </div>
           )}
 
-          {employee.team === 'rapidao' ? (
+          {employee.team === 'both' ? (
+            <div className="flex items-center gap-1 px-2.5 py-0.5 rounded-full bg-purple-50 text-purple-700 text-[10px] font-bold uppercase tracking-wider border border-purple-100">
+              ⚡🚀 50% Flash / 50% Rapidão
+            </div>
+          ) : employee.team === 'rapidao' ? (
             <div className="flex items-center gap-1 px-2.5 py-0.5 rounded-full bg-amber-50 text-amber-700 text-[10px] font-bold uppercase tracking-wider border border-amber-100">
               🚀 Rapidão
             </div>

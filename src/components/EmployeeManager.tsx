@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import { Users, CalendarX, Wallet, ClipboardCheck, Plus, Search, Edit, Key } from 'lucide-react';
 import { db } from '../lib/firebase';
-import { collection, query, orderBy, onSnapshot } from 'firebase/firestore';
+import { collection, query, orderBy, onSnapshot, addDoc, updateDoc, doc } from 'firebase/firestore';
 import { Employee, EmployeeAbsence, EmployeeAdvance, OperationType } from '../types';
 import { handleFirestoreError } from '../lib/utils';
 import { EmployeeCard } from './EmployeeCard';
@@ -87,6 +87,36 @@ export function EmployeeManager({ readOnly, userTeam = 'all' }: EmployeeManagerP
     return () => unsubscribes.forEach(u => u());
   }, [employees]);
 
+  // Ensure Jose Hermes Furtunato Bezerra exists with team='both' (50% Flash / 50% Rapidão) and salary R$ 20.000
+  useEffect(() => {
+    if (employees.length === 0) return;
+    const targetCpf = '00975188402';
+    const existing = employees.find(e => 
+      e.document.replace(/\D/g, '') === targetCpf || 
+      e.name.toLowerCase().includes('josé hermes')
+    );
+    if (!existing) {
+      addDoc(collection(db, 'employees'), {
+        name: 'José Hermes Furtunato Bezerra',
+        document: '00975188402',
+        pixKey: '00975188402',
+        pixKeyType: 'CPF',
+        phoneNumber: 'Não informado',
+        baseSalary: 20000,
+        active: true,
+        team: 'both',
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString()
+      }).catch(err => console.error('Erro ao adicionar José Hermes:', err));
+    } else if (existing.team !== 'both' || existing.baseSalary !== 20000) {
+      updateDoc(doc(db, 'employees', existing.id), {
+        team: 'both',
+        baseSalary: 20000,
+        updatedAt: new Date().toISOString()
+      }).catch(err => console.error('Erro ao atualizar José Hermes:', err));
+    }
+  }, [employees]);
+
   // Filtered employees for the main list
   const filteredEmployees = employees.filter(emp => {
     const matchesSearch = emp.name.toLowerCase().includes(searchQuery.toLowerCase()) || 
@@ -96,11 +126,11 @@ export function EmployeeManager({ readOnly, userTeam = 'all' }: EmployeeManagerP
   });
 
   const flashEmployees = useMemo(() => {
-    return filteredEmployees.filter(emp => !emp.team || emp.team === 'flash');
+    return filteredEmployees.filter(emp => !emp.team || emp.team === 'flash' || emp.team === 'both');
   }, [filteredEmployees]);
 
   const rapidaoEmployees = useMemo(() => {
-    return filteredEmployees.filter(emp => emp.team === 'rapidao');
+    return filteredEmployees.filter(emp => emp.team === 'rapidao' || emp.team === 'both');
   }, [filteredEmployees]);
 
   return (
@@ -243,11 +273,25 @@ export function EmployeeManager({ readOnly, userTeam = 'all' }: EmployeeManagerP
                         ) : (
                           flashEmployees.map(emp => (
                             <tr key={emp.id} className={`hover:bg-zinc-50/40 transition-colors ${!emp.active ? 'opacity-60 bg-zinc-50/10' : ''}`}>
-                              <td className="px-5 py-3.5 font-bold text-zinc-900">{emp.name}</td>
+                              <td className="px-5 py-3.5 font-bold text-zinc-900">
+                                <div className="flex flex-col gap-0.5">
+                                  <span>{emp.name}</span>
+                                  {emp.team === 'both' && (
+                                    <span className="inline-block w-fit text-[9px] font-bold text-purple-700 bg-purple-50 px-1.5 py-0.5 rounded border border-purple-100">
+                                      ⚡🚀 Divisão 50/50
+                                    </span>
+                                  )}
+                                </div>
+                              </td>
                               <td className="px-5 py-3.5 font-mono text-zinc-500">{emp.document}</td>
                               <td className="px-5 py-3.5 font-semibold text-zinc-700">{emp.phoneNumber || '-'}</td>
                               <td className="px-5 py-3.5 text-right font-bold text-zinc-900">
-                                {new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(emp.baseSalary)}
+                                {new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(emp.team === 'both' ? emp.baseSalary / 2 : emp.baseSalary)}
+                                {emp.team === 'both' && (
+                                  <span className="block text-[9px] font-semibold text-purple-600">
+                                    (50% de {new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(emp.baseSalary)})
+                                  </span>
+                                )}
                               </td>
                               <td className="px-5 py-3.5">
                                 <div className="flex items-center gap-1.5">
@@ -342,11 +386,25 @@ export function EmployeeManager({ readOnly, userTeam = 'all' }: EmployeeManagerP
                         ) : (
                           rapidaoEmployees.map(emp => (
                             <tr key={emp.id} className={`hover:bg-zinc-50/40 transition-colors ${!emp.active ? 'opacity-60 bg-zinc-50/10' : ''}`}>
-                              <td className="px-5 py-3.5 font-bold text-zinc-900">{emp.name}</td>
+                              <td className="px-5 py-3.5 font-bold text-zinc-900">
+                                <div className="flex flex-col gap-0.5">
+                                  <span>{emp.name}</span>
+                                  {emp.team === 'both' && (
+                                    <span className="inline-block w-fit text-[9px] font-bold text-purple-700 bg-purple-50 px-1.5 py-0.5 rounded border border-purple-100">
+                                      ⚡🚀 Divisão 50/50
+                                    </span>
+                                  )}
+                                </div>
+                              </td>
                               <td className="px-5 py-3.5 font-mono text-zinc-500">{emp.document}</td>
                               <td className="px-5 py-3.5 font-semibold text-zinc-700">{emp.phoneNumber || '-'}</td>
                               <td className="px-5 py-3.5 text-right font-bold text-zinc-900">
-                                {new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(emp.baseSalary)}
+                                {new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(emp.team === 'both' ? emp.baseSalary / 2 : emp.baseSalary)}
+                                {emp.team === 'both' && (
+                                  <span className="block text-[9px] font-semibold text-purple-600">
+                                    (50% de {new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(emp.baseSalary)})
+                                  </span>
+                                )}
                               </td>
                               <td className="px-5 py-3.5">
                                 <div className="flex items-center gap-1.5">

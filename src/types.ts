@@ -20,13 +20,15 @@ export interface Promoter {
 export interface Employee {
   id: string;
   name: string;
+  role?: string;
+  level?: 'Trainee' | 'Júnior' | 'Pleno' | 'Sênior' | string;
   document: string;
   pixKey: string;
   pixKeyType: 'CPF' | 'CNPJ' | 'Email' | 'Phone' | 'Random';
   phoneNumber?: string;
   baseSalary: number;
   active: boolean;
-  team?: 'flash' | 'rapidao';
+  team?: 'flash' | 'rapidao' | 'both';
   admissionDate?: string;
   dismissalDate?: string;
   createdAt?: string;

@@ -14,6 +14,8 @@ interface EmployeeModalProps {
 export function EmployeeModal({ isOpen, onClose, editingEmployee }: EmployeeModalProps) {
   const [formData, setFormData] = useState({
     name: '',
+    role: '',
+    level: '',
     document: '',
     pixKey: '',
     pixKeyType: 'CPF' as Employee['pixKeyType'],
@@ -31,6 +33,8 @@ export function EmployeeModal({ isOpen, onClose, editingEmployee }: EmployeeModa
     if (editingEmployee) {
       setFormData({
         name: editingEmployee.name,
+        role: editingEmployee.role || '',
+        level: editingEmployee.level || '',
         document: editingEmployee.document,
         pixKey: editingEmployee.pixKey,
         pixKeyType: editingEmployee.pixKeyType,
@@ -44,6 +48,8 @@ export function EmployeeModal({ isOpen, onClose, editingEmployee }: EmployeeModa
     } else {
       setFormData({
         name: '',
+        role: '',
+        level: '',
         document: '',
         pixKey: '',
         pixKeyType: 'CPF',
@@ -74,6 +80,8 @@ export function EmployeeModal({ isOpen, onClose, editingEmployee }: EmployeeModa
     try {
       const dataToSave = {
         name: formData.name.trim(),
+        role: formData.role.trim(),
+        level: formData.level,
         document: formData.document.trim(),
         pixKey: formData.pixKey.trim(),
         pixKeyType: formData.pixKeyType,
@@ -156,6 +164,43 @@ export function EmployeeModal({ isOpen, onClose, editingEmployee }: EmployeeModa
               />
             </div>
 
+            {/* Role and Seniority Level */}
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+              <div className="space-y-1.5">
+                <label className="text-xs font-bold uppercase tracking-wider text-zinc-500">Função / Cargo</label>
+                <select 
+                  value={formData.role}
+                  onChange={e => setFormData({ ...formData, role: e.target.value })}
+                  className="w-full rounded-xl border border-zinc-200 bg-zinc-50 px-4 py-2.5 text-sm focus:border-indigo-500 focus:outline-none focus:ring-4 focus:ring-indigo-500/10 transition-all font-bold"
+                >
+                  <option value="">Selecione o Cargo (Opcional)</option>
+                  <option value="Analista de Cadastro">Analista de Cadastro</option>
+                  <option value="Gestor de Carteira">Gestor de Carteira</option>
+                  <option value="Recuperador">Recuperador</option>
+                  <option value="Capitão">Capitão</option>
+                  <option value="Coordenador">Coordenador</option>
+                  {formData.role && !['Analista de Cadastro', 'Gestor de Carteira', 'Recuperador', 'Capitão', 'Coordenador'].includes(formData.role) && (
+                    <option value={formData.role}>{formData.role}</option>
+                  )}
+                </select>
+              </div>
+
+              <div className="space-y-1.5">
+                <label className="text-xs font-bold uppercase tracking-wider text-zinc-500">Nível / Senioridade</label>
+                <select 
+                  value={formData.level}
+                  onChange={e => setFormData({ ...formData, level: e.target.value })}
+                  className="w-full rounded-xl border border-zinc-200 bg-zinc-50 px-4 py-2.5 text-sm focus:border-indigo-500 focus:outline-none focus:ring-4 focus:ring-indigo-500/10 transition-all font-bold"
+                >
+                  <option value="">Selecione o Nível (Opcional)</option>
+                  <option value="Trainee">Trainee</option>
+                  <option value="Júnior">Júnior</option>
+                  <option value="Pleno">Pleno</option>
+                  <option value="Sênior">Sênior</option>
+                </select>
+              </div>
+            </div>
+
             {/* Document and Phone */}
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
               <div className="space-y-1.5">
@@ -204,8 +249,9 @@ export function EmployeeModal({ isOpen, onClose, editingEmployee }: EmployeeModa
                   onChange={e => setFormData({ ...formData, team: e.target.value as Employee['team'] })}
                   className="w-full rounded-xl border border-zinc-200 bg-zinc-50 px-4 py-2.5 text-sm focus:border-indigo-500 focus:outline-none focus:ring-4 focus:ring-indigo-500/10 transition-all font-bold"
                 >
-                  <option value="flash">⚡ Time Flash</option>
-                  <option value="rapidao">🚀 Time Rapidão</option>
+                  <option value="flash">⚡ Time Flash (100%)</option>
+                  <option value="rapidao">🚀 Time Rapidão (100%)</option>
+                  <option value="both">⚡🚀 Ambas as Equipes (50% Flash / 50% Rapidão)</option>
                 </select>
               </div>
             </div>
