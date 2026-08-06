@@ -49,10 +49,7 @@ export default function AdvanceManager({ promoters, readOnly }: AdvanceManagerPr
     const totalPendingAdvances = (advancesMap[promoterId] || [])
       .filter(a => a.status === 'pending')
       .reduce((sum, a) => sum + a.amount, 0);
-    const totalPaidAdvances = (advancesMap[promoterId] || [])
-      .filter(a => a.status === 'paid')
-      .reduce((sum, a) => sum + a.amount, 0);
-    return Math.max(0, Math.round((totalAttendance - totalPendingAdvances - totalPaidAdvances) * 100) / 100);
+    return Math.max(0, Math.round((totalAttendance - totalPendingAdvances) * 100) / 100);
   };
 
   const getTotalPaid = (promoterId: string) => {
