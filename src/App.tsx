@@ -20,7 +20,8 @@ import {
   FileBarChart,
   Briefcase,
   UserCog,
-  Target
+  Target,
+  Settings
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { signInAnonymously } from 'firebase/auth';
@@ -58,6 +59,7 @@ import GoogleSheetsSync from './components/GoogleSheetsSync';
 import { EmployeeManager } from './components/EmployeeManager';
 import { LocalDataMigrator } from './components/LocalDataMigrator';
 import UserManager from './components/UserManager';
+import SettingsManager from './components/SettingsManager';
 
 export default function App() {
   const [user, setUser] = useState<any>(null);
@@ -70,7 +72,7 @@ export default function App() {
   const [promoters, setPromoters] = useState<Promoter[]>([]);
   const [allAttendance, setAllAttendance] = useState<Attendance[]>([]);
   const [allAdvances, setAllAdvances] = useState<Advance[]>([]);
-  const [activeTab, setActiveTab] = useState<'dashboard' | 'promoters' | 'attendance' | 'leads' | 'advances' | 'reports' | 'employees' | 'users'>('dashboard');
+  const [activeTab, setActiveTab] = useState<'dashboard' | 'promoters' | 'attendance' | 'leads' | 'advances' | 'reports' | 'employees' | 'users' | 'settings'>('dashboard');
   const [isPromoterModalOpen, setIsPromoterModalOpen] = useState(false);
   const [editingPromoter, setEditingPromoter] = useState<Promoter | null>(null);
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
@@ -252,7 +254,7 @@ export default function App() {
       console.error("Login Error:", error);
       let errorMsg = error.message || 'Erro ao realizar login.';
       if (error.code === 'auth/unauthorized-domain' || (errorMsg && errorMsg.includes('unauthorized-domain'))) {
-        errorMsg = 'Domínio não autorizado no Firebase! Por favor, acione o console do seu Firebase (Authentication > Configurações > Domínios Autorizados) e adicione o domínio do seu site da Vercel para autorizar o login.';
+        errorMsg = 'Domínio não autorizado no Firebase! Por favor, acesse o Console do Firebase (Authentication > Settings > Authorized domains) e adicione o domínio atual.';
       } else if (error.code === 'auth/popup-closed-by-user') {
         errorMsg = 'A janela de autenticação foi fechada antes de concluir o login.';
       }
@@ -552,6 +554,12 @@ export default function App() {
               onClick={() => setActiveTab('users')} 
             />
           )}
+          <NavItem 
+            active={activeTab === 'settings'} 
+            icon={<Settings size={20} />} 
+            label="Configurações" 
+            onClick={() => setActiveTab('settings')} 
+          />
         </nav>
 
         <div className="p-4 border-t border-brand-accent/20">
@@ -624,6 +632,9 @@ export default function App() {
                   <UserCog size={24} /> Usuários
                 </button>
               )}
+              <button onClick={() => { setActiveTab('settings'); setIsMobileMenuOpen(false); }} className={`flex w-full items-center gap-4 text-xl font-medium ${activeTab === 'settings' ? 'text-zinc-900' : 'text-zinc-400'}`}>
+                <Settings size={24} /> Configurações
+              </button>
               <div className="pt-6 border-t border-zinc-100">
                 <button onClick={handleLogout} className="flex w-full items-center gap-4 text-xl font-medium text-zinc-400">
                   <LogOut size={24} /> Sair
@@ -648,6 +659,7 @@ export default function App() {
                 {activeTab === 'reports' && 'Relatórios Financeiros'}
                 {activeTab === 'employees' && 'Funcionários Mensalistas'}
                 {activeTab === 'users' && 'Controle de Usuários'}
+                {activeTab === 'settings' && 'Configurações & Ambiente'}
               </h1>
               <div className="flex items-center gap-2 mt-1">
                 <p className="text-zinc-500 font-medium">
@@ -664,7 +676,7 @@ export default function App() {
             </div>
 
             {/* Segmented control for Team Filter */}
-            {activeTab !== 'employees' && activeTab !== 'users' && (
+            {activeTab !== 'employees' && activeTab !== 'users' && activeTab !== 'settings' && (
               (!user?.team || user.team === 'all') ? (
                 <div className="flex bg-zinc-200/50 p-1 rounded-2xl w-fit border border-zinc-200 shadow-inner">
                   <button
@@ -706,7 +718,7 @@ export default function App() {
             )}
           </div>
 
-          {activeTab !== 'employees' && activeTab !== 'reports' && activeTab !== 'users' && userRole !== 'viewer' && (
+          {activeTab !== 'employees' && activeTab !== 'reports' && activeTab !== 'users' && activeTab !== 'settings' && userRole !== 'viewer' && (
             <button 
               onClick={() => { setEditingPromoter(null); setIsPromoterModalOpen(true); }}
               className="inline-flex items-center justify-center gap-2 rounded-xl bg-brand-dark px-6 py-3 text-sm font-bold text-brand-lime transition-all hover:bg-brand-surface border border-brand-lime/20 shadow-xl shadow-brand-lime/10 active:scale-95 self-start lg:self-end"
@@ -861,6 +873,10 @@ export default function App() {
 
               {activeTab === 'users' && (
                 <UserManager readOnly={userRole === 'viewer'} />
+              )}
+
+              {activeTab === 'settings' && (
+                <SettingsManager user={user} userRole={userRole} />
               )}
             </motion.div>
           </AnimatePresence>

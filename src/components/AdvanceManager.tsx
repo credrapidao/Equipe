@@ -19,6 +19,7 @@ interface AdvanceManagerProps {
 export default function AdvanceManager({ promoters, readOnly }: AdvanceManagerProps) {
   const [advancesMap, setAdvancesMap] = useState<Record<string, Advance[]>>({});
   const [weeklyPending, setWeeklyPending] = useState<Record<string, number>>({});
+  const [weeklyPaidAtt, setWeeklyPaidAtt] = useState<Record<string, number>>({});
   const [isAdding, setIsAdding] = useState(false);
   const [selectedPromoterId, setSelectedPromoterId] = useState('');
   const [amount, setAmount] = useState('');
@@ -46,10 +47,19 @@ export default function AdvanceManager({ promoters, readOnly }: AdvanceManagerPr
   // 2. LOGIC HELPERS
   const getPendingBalance = (promoterId: string) => {
     const totalAttendance = weeklyPending[promoterId] || 0;
+    const paidAttendance = weeklyPaidAtt[promoterId] || 0;
+
     const totalPendingAdvances = (advancesMap[promoterId] || [])
       .filter(a => a.status === 'pending')
       .reduce((sum, a) => sum + a.amount, 0);
-    return Math.max(0, Math.round((totalAttendance - totalPendingAdvances) * 100) / 100);
+
+    const totalPaidAdvances = (advancesMap[promoterId] || [])
+      .filter(a => a.status === 'paid')
+      .reduce((sum, a) => sum + a.amount, 0);
+
+    const unclearedPaidAdvances = Math.max(0, totalPaidAdvances - paidAttendance);
+
+    return Math.max(0, Math.round((totalAttendance - totalPendingAdvances - unclearedPaidAdvances) * 100) / 100);
   };
 
   const getTotalPaid = (promoterId: string) => {
@@ -83,12 +93,13 @@ export default function AdvanceManager({ promoters, readOnly }: AdvanceManagerPr
       .reduce((acc, a) => acc + a.amount, 0);
 
     return { pendingReg, registered, paid, weekTotal };
-  }, [promoters, advances, weeklyPending]);
+  }, [promoters, advances, weeklyPending, weeklyPaidAtt]);
 
   useEffect(() => {
     const unsubscribes: (() => void)[] = [];
     setAdvancesMap({});
     setWeeklyPending({});
+    setWeeklyPaidAtt({});
 
     promoters.forEach(promoter => {
       const q = query(
@@ -107,16 +118,24 @@ export default function AdvanceManager({ promoters, readOnly }: AdvanceManagerPr
       unsubscribes.push(unsubAdvances);
 
       const unsubAtt = onSnapshot(collection(db, 'promoters', promoter.id, 'attendance'), (snapshot) => {
-        const total = snapshot.docs
-          .map(doc => doc.data())
-          .filter(data => data.paymentStatus !== 'paid')
-          .reduce((acc, data) => {
-            if (data.status === 'absent') return acc;
-            const rate = data.dailyRate || 100;
-            return acc + (data.status === 'half-day' ? rate / 2 : rate);
-          }, 0);
+        let pendingTotal = 0;
+        let paidTotal = 0;
 
-        setWeeklyPending(prev => ({ ...prev, [promoter.id]: total }));
+        snapshot.docs.forEach(doc => {
+          const data = doc.data();
+          if (data.status === 'absent') return;
+          const rate = data.dailyRate || 100;
+          const val = data.status === 'half-day' ? rate / 2 : rate;
+
+          if (data.paymentStatus === 'paid') {
+            paidTotal += val;
+          } else {
+            pendingTotal += val;
+          }
+        });
+
+        setWeeklyPending(prev => ({ ...prev, [promoter.id]: pendingTotal }));
+        setWeeklyPaidAtt(prev => ({ ...prev, [promoter.id]: paidTotal }));
       });
       unsubscribes.push(unsubAtt);
     });
@@ -589,8 +608,30 @@ export default function AdvanceManager({ promoters, readOnly }: AdvanceManagerPr
       }
     });
 
+    // 2. Registered pending advances
+    advances
+      .filter(a => a.status === 'pending')
+      .forEach(a => {
+        const promoter = promoters.find(p => p.id === a.promoterId);
+        const matchesSearch = (promoter?.name?.toLowerCase() || '').includes(searchTerm.toLowerCase()) || 
+                             (promoter?.document || '').includes(searchTerm) ||
+                             (a.notes?.toLowerCase() || '').includes(searchTerm.toLowerCase());
+        if (matchesSearch) {
+          list.push({
+            id: a.id,
+            advance: a,
+            promoter: promoter,
+            promoterId: a.promoterId,
+            amount: a.amount,
+            status: 'pending',
+            date: a.date,
+            type: 'advance'
+          });
+        }
+      });
+
     return list.sort((a, b) => b.date.localeCompare(a.date));
-  }, [promoters, advances, weeklyPending, searchTerm]);
+  }, [promoters, advances, weeklyPending, weeklyPaidAtt, searchTerm]);
 
   return (
     <div className="space-y-6">
