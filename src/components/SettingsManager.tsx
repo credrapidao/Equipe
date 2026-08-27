@@ -24,10 +24,25 @@ import {
   EyeOff,
   Binary,
   Cpu,
-  Fingerprint
+  Fingerprint,
+  ChevronDown,
+  ChevronUp,
+  Shield,
+  Key
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
-import { CryptoEngine, SecurityMasker, SecuritySanitizer } from '../lib/security';
+import { CryptoEngine, SecurityMasker, SecuritySanitizer, AdminSecurity } from '../lib/security';
+import { db } from '../lib/firebase';
+import { 
+  collection, 
+  query, 
+  where, 
+  getDocs, 
+  updateDoc, 
+  addDoc, 
+  doc, 
+  serverTimestamp 
+} from 'firebase/firestore';
 
 interface SettingsManagerProps {
   user: any;
@@ -39,6 +54,18 @@ export default function SettingsManager({ user, userRole }: SettingsManagerProps
   const [vercelDisabled, setVercelDisabled] = useState<boolean>(true);
   const [copiedStep, setCopiedStep] = useState<number | null>(null);
   const [saveSuccess, setSaveSuccess] = useState(false);
+
+  // Admin Master Password Change State (Discreet & Hidden)
+  const [isPasswordCardOpen, setIsPasswordCardOpen] = useState(false);
+  const [currentAdminPass, setCurrentAdminPass] = useState('');
+  const [newAdminPass, setNewAdminPass] = useState('');
+  const [confirmAdminPass, setConfirmAdminPass] = useState('');
+  const [showCurrentPass, setShowCurrentPass] = useState(false);
+  const [showNewPass, setShowNewPass] = useState(false);
+  const [showConfirmPass, setShowConfirmPass] = useState(false);
+  const [isUpdatingPassword, setIsUpdatingPassword] = useState(false);
+  const [passError, setPassError] = useState<string | null>(null);
+  const [passSuccess, setPassSuccess] = useState<string | null>(null);
 
   // Cryptography Sandbox State
   const [cryptoInput, setCryptoInput] = useState('123.456.789-00');
@@ -53,6 +80,91 @@ export default function SettingsManager({ user, userRole }: SettingsManagerProps
     setVercelDisabled(true);
     runCryptoTest('123.456.789-00', 'MasterCredSec2026!');
   }, []);
+
+  const handleAdminPasswordChange = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setPassError(null);
+    setPassSuccess(null);
+
+    const currentClean = currentAdminPass.trim();
+    const newClean = newAdminPass.trim();
+    const confirmClean = confirmAdminPass.trim();
+
+    if (!currentClean || !newClean || !confirmClean) {
+      setPassError('Preencha todos os campos obrigatórios.');
+      return;
+    }
+
+    if (newClean.length < 4) {
+      setPassError('A nova senha deve possuir pelo menos 4 caracteres.');
+      return;
+    }
+
+    if (newClean !== confirmClean) {
+      setPassError('A confirmação não coincide com a nova senha digitada.');
+      return;
+    }
+
+    setIsUpdatingPassword(true);
+
+    try {
+      // 1. Verify current password
+      const usersRef = collection(db, 'users');
+      const q = query(usersRef, where('username', '==', 'admin'));
+      const querySnapshot = await getDocs(q);
+
+      let firestorePass: string | undefined = undefined;
+      let adminDocId: string | null = null;
+
+      if (!querySnapshot.empty) {
+        const docSnap = querySnapshot.docs[0];
+        adminDocId = docSnap.id;
+        firestorePass = docSnap.data().password;
+      }
+
+      const isValidCurrent = await AdminSecurity.verifyAdminPassword(currentClean, firestorePass);
+      if (!isValidCurrent) {
+        setPassError('A senha atual de administrador está incorreta.');
+        setIsUpdatingPassword(false);
+        return;
+      }
+
+      // 2. Persist new password to Firestore and hash storage
+      if (adminDocId) {
+        await updateDoc(doc(db, 'users', adminDocId), {
+          password: newClean,
+          displayName: 'Administrador Master',
+          role: 'admin',
+          updatedAt: serverTimestamp()
+        });
+      } else {
+        await addDoc(collection(db, 'users'), {
+          username: 'admin',
+          displayName: 'Administrador Master',
+          password: newClean,
+          role: 'admin',
+          team: 'all',
+          createdAt: serverTimestamp(),
+          updatedAt: serverTimestamp()
+        });
+      }
+
+      // 3. Save local SHA-256 hash
+      await AdminSecurity.saveLocalAdminHash(newClean);
+
+      // 4. Reset form fields immediately
+      setCurrentAdminPass('');
+      setNewAdminPass('');
+      setConfirmAdminPass('');
+      setPassSuccess('Senha de Administrador alterada com sucesso! A nova credencial já está ativa.');
+      setTimeout(() => setPassSuccess(null), 6000);
+    } catch (err: any) {
+      console.error('Password change error:', err);
+      setPassError(err.message || 'Erro ao atualizar a senha no banco de dados.');
+    } finally {
+      setIsUpdatingPassword(false);
+    }
+  };
 
   const runCryptoTest = async (text: string, pass: string) => {
     setIsEncrypting(true);
@@ -246,6 +358,183 @@ export default function SettingsManager({ user, userRole }: SettingsManagerProps
                   </p>
                 </div>
               </div>
+            </div>
+
+            {/* DISCREET ADMIN PASSWORD CHANGER CARD */}
+            <div className="bg-white rounded-3xl p-6 sm:p-8 border border-zinc-200/80 shadow-sm space-y-5">
+              <div className="flex items-center justify-between flex-wrap gap-4">
+                <div className="flex items-center gap-3">
+                  <div className="p-2.5 rounded-2xl bg-zinc-900 text-brand-lime">
+                    <Key size={22} />
+                  </div>
+                  <div>
+                    <div className="flex items-center gap-2">
+                      <h3 className="text-lg font-bold text-zinc-900">
+                        Troca de Senha Mestra (Administrador)
+                      </h3>
+                      <span className="text-[9px] font-extrabold uppercase px-2 py-0.5 bg-zinc-100 text-zinc-600 rounded-full border border-zinc-200">
+                        Discreto & Blindado
+                      </span>
+                    </div>
+                    <p className="text-xs text-zinc-500">
+                      Altere a credencial mestra de acesso root do sistema com verificação de segurança em duas etapas.
+                    </p>
+                  </div>
+                </div>
+
+                <button
+                  type="button"
+                  onClick={() => setIsPasswordCardOpen(!isPasswordCardOpen)}
+                  className="px-4 py-2 bg-zinc-100 hover:bg-zinc-200 text-zinc-800 rounded-xl text-xs font-bold transition-all flex items-center gap-2"
+                >
+                  {isPasswordCardOpen ? (
+                    <>
+                      <ChevronUp size={16} />
+                      Ocultar Formulário
+                    </>
+                  ) : (
+                    <>
+                      <Lock size={14} className="text-indigo-600" />
+                      Alterar Senha de Administrador
+                    </>
+                  )}
+                </button>
+              </div>
+
+              <AnimatePresence>
+                {isPasswordCardOpen && (
+                  <motion.form
+                    initial={{ opacity: 0, height: 0 }}
+                    animate={{ opacity: 1, height: 'auto' }}
+                    exit={{ opacity: 0, height: 0 }}
+                    transition={{ duration: 0.25 }}
+                    onSubmit={handleAdminPasswordChange}
+                    className="space-y-4 pt-4 border-t border-zinc-100"
+                  >
+                    {passError && (
+                      <div className="p-3.5 rounded-2xl bg-red-50 border border-red-200 text-xs font-semibold text-red-700 flex items-center gap-2">
+                        <AlertTriangle size={16} className="shrink-0 text-red-600" />
+                        <span>{passError}</span>
+                      </div>
+                    )}
+
+                    {passSuccess && (
+                      <div className="p-3.5 rounded-2xl bg-emerald-50 border border-emerald-200 text-xs font-semibold text-emerald-800 flex items-center gap-2">
+                        <CheckCircle2 size={16} className="shrink-0 text-emerald-600" />
+                        <span>{passSuccess}</span>
+                      </div>
+                    )}
+
+                    <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                      {/* Current Admin Password */}
+                      <div className="space-y-1.5">
+                        <label className="text-[11px] font-bold text-zinc-700 uppercase tracking-wider">
+                          Senha Atual do Admin *
+                        </label>
+                        <div className="relative">
+                          <input
+                            type={showCurrentPass ? 'text' : 'password'}
+                            required
+                            placeholder="Digite a senha atual"
+                            value={currentAdminPass}
+                            onChange={(e) => setCurrentAdminPass(e.target.value)}
+                            className="w-full pl-3.5 pr-10 py-2.5 bg-zinc-50 border border-zinc-300 rounded-xl text-xs font-mono font-bold text-zinc-900 focus:bg-white focus:ring-2 focus:ring-indigo-500 focus:outline-none transition-all"
+                          />
+                          <button
+                            type="button"
+                            onClick={() => setShowCurrentPass(!showCurrentPass)}
+                            className="absolute right-2.5 top-1/2 -translate-y-1/2 text-zinc-400 hover:text-zinc-700 p-1"
+                            title={showCurrentPass ? "Ocultar" : "Exibir"}
+                          >
+                            {showCurrentPass ? <EyeOff size={14} /> : <Eye size={14} />}
+                          </button>
+                        </div>
+                      </div>
+
+                      {/* New Admin Password */}
+                      <div className="space-y-1.5">
+                        <label className="text-[11px] font-bold text-zinc-700 uppercase tracking-wider">
+                          Nova Senha *
+                        </label>
+                        <div className="relative">
+                          <input
+                            type={showNewPass ? 'text' : 'password'}
+                            required
+                            placeholder="Mínimo 4 caracteres"
+                            value={newAdminPass}
+                            onChange={(e) => setNewAdminPass(e.target.value)}
+                            className="w-full pl-3.5 pr-10 py-2.5 bg-zinc-50 border border-zinc-300 rounded-xl text-xs font-mono font-bold text-zinc-900 focus:bg-white focus:ring-2 focus:ring-indigo-500 focus:outline-none transition-all"
+                          />
+                          <button
+                            type="button"
+                            onClick={() => setShowNewPass(!showNewPass)}
+                            className="absolute right-2.5 top-1/2 -translate-y-1/2 text-zinc-400 hover:text-zinc-700 p-1"
+                            title={showNewPass ? "Ocultar" : "Exibir"}
+                          >
+                            {showNewPass ? <EyeOff size={14} /> : <Eye size={14} />}
+                          </button>
+                        </div>
+                      </div>
+
+                      {/* Confirm New Password */}
+                      <div className="space-y-1.5">
+                        <label className="text-[11px] font-bold text-zinc-700 uppercase tracking-wider">
+                          Confirmar Nova Senha *
+                        </label>
+                        <div className="relative">
+                          <input
+                            type={showConfirmPass ? 'text' : 'password'}
+                            required
+                            placeholder="Repita a nova senha"
+                            value={confirmAdminPass}
+                            onChange={(e) => setConfirmAdminPass(e.target.value)}
+                            className="w-full pl-3.5 pr-10 py-2.5 bg-zinc-50 border border-zinc-300 rounded-xl text-xs font-mono font-bold text-zinc-900 focus:bg-white focus:ring-2 focus:ring-indigo-500 focus:outline-none transition-all"
+                          />
+                          <button
+                            type="button"
+                            onClick={() => setShowConfirmPass(!showConfirmPass)}
+                            className="absolute right-2.5 top-1/2 -translate-y-1/2 text-zinc-400 hover:text-zinc-700 p-1"
+                            title={showConfirmPass ? "Ocultar" : "Exibir"}
+                          >
+                            {showConfirmPass ? <EyeOff size={14} /> : <Eye size={14} />}
+                          </button>
+                        </div>
+                      </div>
+                    </div>
+
+                    <div className="flex flex-col sm:flex-row items-center justify-between gap-3 pt-2">
+                      <div className="text-[11px] text-zinc-500 flex items-center gap-1.5">
+                        <Shield size={14} className="text-emerald-600" />
+                        <span>A nova senha é criptografada e salva diretamente no banco de dados Firestore e protegida por hash SHA-256.</span>
+                      </div>
+
+                      <div className="flex items-center gap-2 w-full sm:w-auto">
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setIsPasswordCardOpen(false);
+                            setCurrentAdminPass('');
+                            setNewAdminPass('');
+                            setConfirmAdminPass('');
+                            setPassError(null);
+                          }}
+                          className="px-4 py-2 rounded-xl text-xs font-bold text-zinc-600 hover:bg-zinc-100 transition-colors"
+                        >
+                          Cancelar
+                        </button>
+                        <button
+                          type="submit"
+                          disabled={isUpdatingPassword}
+                          className="px-5 py-2.5 bg-zinc-900 hover:bg-zinc-800 text-white rounded-xl text-xs font-bold transition-all flex items-center gap-2 shadow-md shadow-zinc-900/10 disabled:opacity-50"
+                        >
+                          <KeyRound size={14} className={isUpdatingPassword ? 'animate-spin' : ''} />
+                          {isUpdatingPassword ? 'Gravando Senha...' : 'Salvar Nova Senha'}
+                        </button>
+                      </div>
+                    </div>
+                  </motion.form>
+                )}
+              </AnimatePresence>
             </div>
 
             {/* Real-Time Cryptographic Engine Simulator */}

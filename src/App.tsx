@@ -21,7 +21,9 @@ import {
   Briefcase,
   UserCog,
   Target,
-  Settings
+  Settings,
+  Eye,
+  EyeOff
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { signInAnonymously } from 'firebase/auth';
@@ -47,6 +49,7 @@ import {
 } from 'firebase/firestore';
 import { Promoter, Attendance, Advance, OperationType, AppUser } from './types';
 import { handleFirestoreError, formatDate, formatCurrency } from './lib/utils';
+import { AdminSecurity } from './lib/security';
 
 // Components
 import PromoterCard from './components/PromoterCard';
@@ -66,6 +69,7 @@ export default function App() {
   const [userRole, setUserRole] = useState<'admin' | 'viewer'>('admin');
   const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
+  const [showLoginPassword, setShowLoginPassword] = useState(false);
   const [loginError, setLoginError] = useState('');
   const [isAuthenticating, setIsAuthenticating] = useState(false);
   const [loading, setLoading] = useState(true);
@@ -293,7 +297,28 @@ export default function App() {
         const userDoc = querySnapshot.docs[0];
         const userData = userDoc.data();
 
-        if (userData.password === cleanPass) {
+        // If this is the master admin user
+        if (cleanUser === 'admin') {
+          const isValid = await AdminSecurity.verifyAdminPassword(cleanPass, userData.password);
+          if (isValid) {
+            const adminUser = {
+              uid: userDoc.id,
+              displayName: userData.displayName || 'Administrador',
+              email: `${userData.username}@rapidao.com`,
+              team: userData.team || 'all'
+            };
+
+            localStorage.setItem('rapidaocred_session', JSON.stringify({
+              user: adminUser,
+              role: 'admin'
+            }));
+
+            setUser(adminUser);
+            setUserRole('admin');
+            setIsAuthenticating(false);
+            return;
+          }
+        } else if (userData.password === cleanPass) {
           const customUser = {
             uid: userDoc.id,
             displayName: userData.displayName || userData.username,
@@ -313,20 +338,34 @@ export default function App() {
         }
       }
 
-      // 3. Fallback to static accounts if not found in Firestore
-      if (cleanUser === 'admin' && cleanPass === 'admin123') {
-        const adminUser = { uid: 'admin-local', displayName: 'Administrador', email: 'admin@rapidao.com', team: 'all' };
-        localStorage.setItem('rapidaocred_session', JSON.stringify({ user: adminUser, role: 'admin' }));
-        setUser(adminUser);
-        setUserRole('admin');
-      } else if ((cleanUser === 'visualizacao' || cleanUser === 'viewer' || cleanUser === 'view') && cleanPass === 'view123') {
+      // 3. Fallback verification for master admin
+      if (cleanUser === 'admin') {
+        const isValid = await AdminSecurity.verifyAdminPassword(cleanPass);
+        if (isValid) {
+          const adminUser = { uid: 'admin-local', displayName: 'Administrador', email: 'admin@rapidao.com', team: 'all' };
+          localStorage.setItem('rapidaocred_session', JSON.stringify({ user: adminUser, role: 'admin' }));
+          setUser(adminUser);
+          setUserRole('admin');
+          setIsAuthenticating(false);
+          return;
+        } else {
+          setLoginError('Senha de administrador incorreta.');
+          setIsAuthenticating(false);
+          return;
+        }
+      }
+
+      // 4. Default viewer fallback
+      if ((cleanUser === 'visualizacao' || cleanUser === 'viewer' || cleanUser === 'view') && cleanPass === 'view123') {
         const viewerUser = { uid: 'viewer-local', displayName: 'Visualizador', email: 'view@rapidao.com', team: 'all' };
         localStorage.setItem('rapidaocred_session', JSON.stringify({ user: viewerUser, role: 'viewer' }));
         setUser(viewerUser);
         setUserRole('viewer');
-      } else {
-        setLoginError('Usuário ou senha inválidos.');
+        setIsAuthenticating(false);
+        return;
       }
+
+      setLoginError('Usuário ou senha inválidos.');
     } catch (err: any) {
       console.error('Credential login error:', err);
       setLoginError('Erro técnico durante o login.');
@@ -426,54 +465,38 @@ export default function App() {
 
             <div className="space-y-1">
               <label className="text-[10px] font-bold uppercase tracking-wider text-zinc-400">Senha</label>
-              <input
-                type="password"
-                required
-                placeholder="Digite sua senha"
-                value={password}
-                onChange={(e) => setPassword(e.target.value)}
-                className="w-full rounded-xl border border-zinc-200 bg-zinc-50 px-4 py-2.5 text-sm font-bold text-zinc-900 focus:border-indigo-500 focus:bg-white focus:outline-none focus:ring-4 focus:ring-indigo-500/10 transition-all"
-              />
+              <div className="relative">
+                <input
+                  type={showLoginPassword ? 'text' : 'password'}
+                  required
+                  placeholder="Digite sua senha de acesso"
+                  value={password}
+                  onChange={(e) => setPassword(e.target.value)}
+                  className="w-full rounded-xl border border-zinc-200 bg-zinc-50 pl-4 pr-11 py-2.5 text-sm font-bold text-zinc-900 focus:border-indigo-500 focus:bg-white focus:outline-none focus:ring-4 focus:ring-indigo-500/10 transition-all font-mono"
+                />
+                <button
+                  type="button"
+                  onClick={() => setShowLoginPassword(!showLoginPassword)}
+                  className="absolute right-3 top-1/2 -translate-y-1/2 text-zinc-400 hover:text-zinc-700 p-1 transition-colors"
+                  title={showLoginPassword ? "Ocultar senha" : "Exibir senha"}
+                >
+                  {showLoginPassword ? <EyeOff size={16} /> : <Eye size={16} />}
+                </button>
+              </div>
             </div>
 
             <button
               type="submit"
               disabled={isAuthenticating}
-              className="w-full flex items-center justify-center rounded-xl bg-zinc-900 py-3 text-sm font-bold text-white transition-all hover:bg-zinc-800 active:scale-[0.98] disabled:opacity-50"
+              className="w-full flex items-center justify-center rounded-xl bg-zinc-900 py-3 text-sm font-bold text-white transition-all hover:bg-zinc-800 active:scale-[0.98] disabled:opacity-50 shadow-md shadow-zinc-900/10"
             >
               {isAuthenticating ? 'Autenticando...' : 'Acessar Sistema'}
             </button>
           </form>
 
-          <div className="relative flex py-2 items-center">
+          <div className="relative flex py-1 items-center">
             <div className="flex-grow border-t border-zinc-200"></div>
-            <span className="flex-shrink mx-4 text-[10px] font-bold uppercase tracking-widest text-zinc-400">Testar Presetes rápidos</span>
-            <div className="flex-grow border-t border-zinc-200"></div>
-          </div>
-
-          <div className="grid grid-cols-2 gap-3">
-            <button
-              type="button"
-              onClick={() => handleQuickLogin('admin')}
-              className="flex flex-col items-center justify-center p-3 rounded-2xl border border-emerald-100 bg-emerald-50/50 hover:bg-emerald-50 text-emerald-800 transition-all group cursor-pointer"
-            >
-              <span className="text-xs font-extrabold">Entrar como Admin</span>
-              <span className="text-[9px] text-emerald-600/70 font-semibold mt-0.5">Acesso Total</span>
-            </button>
-
-            <button
-              type="button"
-              onClick={() => handleQuickLogin('viewer')}
-              className="flex flex-col items-center justify-center p-3 rounded-2xl border border-amber-100 bg-amber-50/50 hover:bg-amber-50 text-amber-800 transition-all group cursor-pointer"
-            >
-              <span className="text-xs font-extrabold">Entrar como Viewer</span>
-              <span className="text-[9px] text-amber-600/70 font-semibold mt-0.5">Apenas Leitura</span>
-            </button>
-          </div>
-
-          <div className="relative flex py-2 items-center">
-            <div className="flex-grow border-t border-zinc-200"></div>
-            <span className="flex-shrink mx-4 text-[10px] font-bold uppercase tracking-widest text-zinc-400">Ou continue com</span>
+            <span className="flex-shrink mx-4 text-[10px] font-bold uppercase tracking-widest text-zinc-400">Ou autenticação direta</span>
             <div className="flex-grow border-t border-zinc-200"></div>
           </div>
 

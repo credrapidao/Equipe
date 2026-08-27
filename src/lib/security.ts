@@ -192,3 +192,55 @@ export const SecuritySanitizer = {
     return input.replace(/<[^>]*>?/gm, '').trim();
   }
 };
+
+// 4. ADMIN MASTER PASSWORD SECURITY ENGINE
+const ADMIN_HASH_KEY = 'rapidao_admin_sec_hash_v2';
+const DEFAULT_INITIAL_ADMIN_PASS = 'admin123';
+
+export const AdminSecurity = {
+  /**
+   * Hashes a password string with SHA-256
+   */
+  hashPassword: async (password: string): Promise<string> => {
+    return CryptoEngine.calculateSHA256(`ADMIN_SALT_2026_${password}_SEC`);
+  },
+
+  /**
+   * Stores the new Admin Master Password hash in local secure storage
+   */
+  saveLocalAdminHash: async (password: string): Promise<void> => {
+    const hash = await AdminSecurity.hashPassword(password);
+    localStorage.setItem(ADMIN_HASH_KEY, hash);
+  },
+
+  /**
+   * Verifies if a given password matches the current admin credentials
+   */
+  verifyAdminPassword: async (inputPass: string, firestorePass?: string): Promise<boolean> => {
+    const cleanInput = inputPass.trim();
+    if (!cleanInput) return false;
+
+    // 1. If firestore user document exists with a custom password
+    if (firestorePass) {
+      return firestorePass === cleanInput;
+    }
+
+    // 2. Check local secure hash
+    const savedHash = localStorage.getItem(ADMIN_HASH_KEY);
+    if (savedHash) {
+      const inputHash = await AdminSecurity.hashPassword(cleanInput);
+      return savedHash === inputHash;
+    }
+
+    // 3. Fallback to initial default only if never changed
+    return cleanInput === DEFAULT_INITIAL_ADMIN_PASS;
+  },
+
+  /**
+   * Checks whether the admin password has been customized
+   */
+  hasCustomPassword: (): boolean => {
+    return !!localStorage.getItem(ADMIN_HASH_KEY);
+  }
+};
+

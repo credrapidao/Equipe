@@ -28,6 +28,7 @@ import {
   where
 } from 'firebase/firestore';
 import { AppUser } from '../types';
+import { AdminSecurity } from '../lib/security';
 
 interface UserManagerProps {
   readOnly?: boolean;
@@ -156,6 +157,10 @@ export default function UserManager({ readOnly }: UserManagerProps) {
           ...payload,
           createdAt: serverTimestamp()
         });
+      }
+
+      if (usernameClean === 'admin') {
+        await AdminSecurity.saveLocalAdminHash(passwordClean);
       }
 
       setIsModalOpen(false);
