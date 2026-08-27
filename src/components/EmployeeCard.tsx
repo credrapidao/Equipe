@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
-import { User, Phone, Edit, CheckCircle2, XCircle, Coins, Key, Copy, Check, Calendar } from 'lucide-react';
+import { User, Phone, Edit, CheckCircle2, XCircle, Coins, Key, Copy, Check, Calendar, Eye, EyeOff, Shield } from 'lucide-react';
 import { Employee } from '../types';
+import { SecurityMasker } from '../lib/security';
 
 interface EmployeeCardProps {
   key?: string;
@@ -10,6 +11,7 @@ interface EmployeeCardProps {
 
 export function EmployeeCard({ employee, onEdit }: EmployeeCardProps) {
   const [copied, setCopied] = useState(false);
+  const [showSensitive, setShowSensitive] = useState(false);
 
   const formatCurrency = (val: number) => {
     return new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(val);
@@ -21,6 +23,11 @@ export function EmployeeCard({ employee, onEdit }: EmployeeCardProps) {
     if (!y || !m || !d) return dateStr;
     return `${d}/${m}/${y}`;
   };
+
+  const displayDocument = showSensitive ? employee.document : SecurityMasker.maskCPF(employee.document);
+  const displayPix = showSensitive ? employee.pixKey : SecurityMasker.maskPixKey(employee.pixKey, employee.pixKeyType);
+  const displayPhone = showSensitive ? employee.phoneNumber : SecurityMasker.maskPhone(employee.phoneNumber);
+  const displaySalary = showSensitive ? formatCurrency(employee.baseSalary) : 'R$ •••••••';
 
   const handleCopy = () => {
     let text = `NOME: ${employee.name}`;
@@ -46,10 +53,19 @@ export function EmployeeCard({ employee, onEdit }: EmployeeCardProps) {
         : 'border-zinc-100 bg-zinc-50/50 opacity-75'
     }`}>
       {/* Action Buttons */}
-      <div className="absolute top-4 right-4 flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-all duration-200">
+      <div className="absolute top-4 right-4 flex items-center gap-1">
+        <button 
+          onClick={() => setShowSensitive(!showSensitive)}
+          className={`p-2 rounded-xl transition-all duration-200 ${
+            showSensitive ? 'bg-indigo-50 text-indigo-600' : 'bg-zinc-50 text-zinc-400 hover:text-zinc-700'
+          }`}
+          title={showSensitive ? "Ocultar dados confidenciais (LGPD)" : "Revelar dados confidenciais"}
+        >
+          {showSensitive ? <EyeOff size={16} /> : <Eye size={16} />}
+        </button>
         <button 
           onClick={handleCopy}
-          className={`p-2 rounded-xl transition-all duration-200 ${
+          className={`p-2 rounded-xl transition-all duration-200 opacity-0 group-hover:opacity-100 ${
             copied ? 'bg-green-50 text-green-600' : 'bg-zinc-50 text-zinc-400 hover:text-indigo-600 hover:bg-indigo-50'
           }`}
           title="Copiar dados do funcionário"
@@ -58,7 +74,7 @@ export function EmployeeCard({ employee, onEdit }: EmployeeCardProps) {
         </button>
         <button 
           onClick={() => onEdit(employee)}
-          className="p-2 rounded-xl bg-zinc-50 text-zinc-400 hover:text-indigo-600 hover:bg-indigo-50 transition-all duration-200"
+          className="p-2 rounded-xl bg-zinc-50 text-zinc-400 hover:text-indigo-600 hover:bg-indigo-50 transition-all duration-200 opacity-0 group-hover:opacity-100"
           title="Editar Funcionário"
         >
           <Edit size={16} />
@@ -87,8 +103,8 @@ export function EmployeeCard({ employee, onEdit }: EmployeeCardProps) {
               )}
             </div>
           )}
-          <p className="text-xs font-semibold text-zinc-400 tracking-wider uppercase">
-            CPF: {employee.document}
+          <p className="text-xs font-semibold text-zinc-400 tracking-wider uppercase tabular-nums">
+            CPF: {displayDocument}
           </p>
         </div>
       </div>
@@ -99,15 +115,15 @@ export function EmployeeCard({ employee, onEdit }: EmployeeCardProps) {
           <span className="text-[10px] uppercase font-bold text-zinc-400 tracking-wider">Salário Mensal</span>
           <div className="flex items-center gap-1 font-bold text-zinc-900">
             <Coins size={12} className="text-zinc-400" />
-            {formatCurrency(employee.baseSalary)}
+            {displaySalary}
           </div>
         </div>
 
         <div className="space-y-0.5">
           <span className="text-[10px] uppercase font-bold text-zinc-400 tracking-wider">Chave Pix</span>
-          <div className="flex items-center gap-1 font-semibold text-zinc-800 truncate" title={`${employee.pixKeyType}: ${employee.pixKey}`}>
+          <div className="flex items-center gap-1 font-semibold text-zinc-800 truncate" title={`${employee.pixKeyType}: ${displayPix}`}>
             <Key size={12} className="text-indigo-400 shrink-0" />
-            <span className="truncate">{employee.pixKey}</span>
+            <span className="truncate tabular-nums">{displayPix}</span>
           </div>
         </div>
 
@@ -131,9 +147,9 @@ export function EmployeeCard({ employee, onEdit }: EmployeeCardProps) {
         {employee.phoneNumber && (
           <div className="col-span-2 space-y-0.5 border-t border-zinc-50 pt-2 flex items-center justify-between">
             <span className="text-[10px] uppercase font-bold text-zinc-400 tracking-wider">Celular</span>
-            <span className="text-zinc-700 flex items-center gap-1 font-bold">
+            <span className="text-zinc-700 flex items-center gap-1 font-bold tabular-nums">
               <Phone size={12} className="text-zinc-400" />
-              {employee.phoneNumber}
+              {displayPhone}
             </span>
           </div>
         )}
@@ -168,7 +184,8 @@ export function EmployeeCard({ employee, onEdit }: EmployeeCardProps) {
             </div>
           )}
         </div>
-        <div className="text-[10px] font-bold text-zinc-400 uppercase tracking-tighter">
+        <div className="text-[10px] font-bold text-zinc-400 uppercase tracking-tighter flex items-center gap-1">
+          <Shield size={10} className="text-indigo-500" />
           id: {employee.id.slice(-6)}
         </div>
       </div>
