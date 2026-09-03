@@ -1,70 +1,62 @@
 rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
-    function isSignedIn() {
-      return request.auth != null;
-    }
-
-    function isAdmin() {
-      return isSignedIn();
-    }
-
     match /promoters/{promoterId} {
-      allow read: if isAdmin();
-      allow create: if isAdmin() && isValidPromoter(request.resource.data);
-      allow update: if isAdmin() && isValidPromoter(request.resource.data);
-      allow delete: if isAdmin();
+      allow read: if true;
+      allow create: if isValidPromoter(request.resource.data);
+      allow update: if isValidPromoter(request.resource.data);
+      allow delete: if true;
 
       match /attendance/{attendanceId} {
-        allow read: if isAdmin();
-        allow create: if isAdmin() && isValidAttendance(request.resource.data);
-        allow update: if isAdmin();
-        allow delete: if isAdmin();
+        allow read: if true;
+        allow create: if isValidAttendance(request.resource.data);
+        allow update: if true;
+        allow delete: if true;
       }
 
       match /advances/{advanceId} {
-        allow read: if isAdmin();
-        allow create: if isAdmin() && isValidAdvance(request.resource.data);
-        allow update: if isAdmin();
-        allow delete: if isAdmin();
+        allow read: if true;
+        allow create: if isValidAdvance(request.resource.data);
+        allow update: if true;
+        allow delete: if true;
       }
 
       match /leads/{leadId} {
-        allow read, write: if isAdmin();
+        allow read, write: if true;
       }
     }
 
     match /leads/{leadId} {
-      allow read, write: if isAdmin();
+      allow read, write: if true;
     }
 
     match /config/{configId} {
-      allow read, write: if isAdmin();
+      allow read, write: if true;
     }
 
     match /employees/{employeeId} {
-      allow read: if isAdmin();
-      allow create: if isAdmin() && isValidEmployee(request.resource.data);
-      allow update: if isAdmin() && isValidEmployee(request.resource.data);
-      allow delete: if isAdmin();
+      allow read: if true;
+      allow create: if isValidEmployee(request.resource.data);
+      allow update: if isValidEmployee(request.resource.data);
+      allow delete: if true;
 
       match /absences/{absenceId} {
-        allow read: if isAdmin();
-        allow create: if isAdmin() && isValidEmployeeAbsence(request.resource.data);
-        allow update: if isAdmin();
-        allow delete: if isAdmin();
+        allow read: if true;
+        allow create: if isValidEmployeeAbsence(request.resource.data);
+        allow update: if true;
+        allow delete: if true;
       }
 
       match /advances/{advanceId} {
-        allow read: if isAdmin();
-        allow create: if isAdmin() && isValidEmployeeAdvance(request.resource.data);
-        allow update: if isAdmin();
-        allow delete: if isAdmin();
+        allow read: if true;
+        allow create: if isValidEmployeeAdvance(request.resource.data);
+        allow update: if true;
+        allow delete: if true;
       }
     }
 
     match /users/{userId} {
-      allow read, write: if isAdmin();
+      allow read, write: if true;
     }
 
     function isValidPromoter(data) {

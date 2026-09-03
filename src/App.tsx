@@ -26,7 +26,6 @@ import {
   EyeOff
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
-import { signInAnonymously } from 'firebase/auth';
 import { 
   onAuthStateChanged, 
   signInWithPopup, 
@@ -164,12 +163,7 @@ export default function App() {
             const parsed = JSON.parse(stored);
             setUser(parsed.user);
             setUserRole(parsed.role);
-            // Re-authenticate silently in the background so they can access Cloud Firestore
-            signInAnonymously(auth).catch(err => {
-              console.warn('Silent anonymous login failed on refresh:', err);
-              // Still let them through to the app (though Firestore might fail if rules strictly block)
-              setLoading(false);
-            });
+            setLoading(false);
           } catch {
             localStorage.removeItem('rapidaocred_session');
             setUser(null);
@@ -285,10 +279,7 @@ export default function App() {
     const cleanPass = password.trim();
 
     try {
-      // 1. Sign in anonymously first to enable Firestore queries
-      await signInAnonymously(auth);
-
-      // 2. Query Firestore 'users' collection
+      // 1. Query Firestore 'users' collection
       const usersRef = collection(db, 'users');
       const q = query(usersRef, where('username', '==', cleanUser));
       const querySnapshot = await getDocs(q);
@@ -317,8 +308,12 @@ export default function App() {
             setUserRole('admin');
             setIsAuthenticating(false);
             return;
+          } else {
+            setLoginError('Senha de administrador incorreta.');
+            setIsAuthenticating(false);
+            return;
           }
-        } else if (userData.password === cleanPass) {
+        } else if (userData.password === cleanPass || userData.password?.trim() === cleanPass) {
           const customUser = {
             uid: userDoc.id,
             displayName: userData.displayName || userData.username,
@@ -333,6 +328,10 @@ export default function App() {
 
           setUser(customUser);
           setUserRole(userData.role || 'viewer');
+          setIsAuthenticating(false);
+          return;
+        } else {
+          setLoginError('Senha incorreta para o usuário informado.');
           setIsAuthenticating(false);
           return;
         }
@@ -365,10 +364,10 @@ export default function App() {
         return;
       }
 
-      setLoginError('Usuário ou senha inválidos.');
+      setLoginError('Usuário não encontrado ou senha inválida.');
     } catch (err: any) {
       console.error('Credential login error:', err);
-      setLoginError('Erro técnico durante o login.');
+      setLoginError(err?.message ? `Erro técnico durante o login: ${err.message}` : 'Erro técnico durante o login.');
     } finally {
       setIsAuthenticating(false);
     }
@@ -381,25 +380,11 @@ export default function App() {
       if (role === 'admin') {
         const adminUser = { uid: 'admin-local', displayName: 'Administrador (Presete)', email: 'admin@rapidao.com' };
         localStorage.setItem('rapidaocred_session', JSON.stringify({ user: adminUser, role: 'admin' }));
-        
-        try {
-          await signInAnonymously(auth);
-        } catch (err) {
-          console.warn('Anonymous login failed:', err);
-        }
-        
         setUser(adminUser);
         setUserRole('admin');
       } else {
         const viewerUser = { uid: 'viewer-local', displayName: 'Visualizador (Presete)', email: 'view@rapidao.com' };
         localStorage.setItem('rapidaocred_session', JSON.stringify({ user: viewerUser, role: 'viewer' }));
-        
-        try {
-          await signInAnonymously(auth);
-        } catch (err) {
-          console.warn('Anonymous login failed:', err);
-        }
-        
         setUser(viewerUser);
         setUserRole('viewer');
       }
