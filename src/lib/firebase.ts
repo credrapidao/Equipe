@@ -8,9 +8,11 @@ import { getAuth, GoogleAuthProvider, signInWithPopup, signOut, onAuthStateChang
 import { initializeFirestore } from 'firebase/firestore';
 import firebaseConfig from '@/firebase-applet-config.json';
 
+export { firebaseConfig };
+
 const app = initializeApp(firebaseConfig);
 export const db = initializeFirestore(app, {
-  experimentalForceLongPolling: true,
+  experimentalAutoDetectLongPolling: true,
 }, firebaseConfig.firestoreDatabaseId);
 export const auth = getAuth(app);
 export const googleProvider = new GoogleAuthProvider();

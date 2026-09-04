@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { X, Save, AlertCircle } from 'lucide-react';
+import { X, Save, AlertCircle, Trash2 } from 'lucide-react';
 import { db } from '../lib/firebase';
 import { collection, addDoc, updateDoc, doc, serverTimestamp } from 'firebase/firestore';
 import { Employee, OperationType } from '../types';
@@ -9,9 +9,11 @@ interface EmployeeModalProps {
   isOpen: boolean;
   onClose: () => void;
   editingEmployee?: Employee | null;
+  onDelete?: (employee: Employee) => void;
+  readOnly?: boolean;
 }
 
-export function EmployeeModal({ isOpen, onClose, editingEmployee }: EmployeeModalProps) {
+export function EmployeeModal({ isOpen, onClose, editingEmployee, onDelete, readOnly }: EmployeeModalProps) {
   const [formData, setFormData] = useState({
     name: '',
     role: '',
@@ -107,7 +109,8 @@ export function EmployeeModal({ isOpen, onClose, editingEmployee }: EmployeeModa
 
       onClose();
     } catch (err: any) {
-      handleFirestoreError(err, editingEmployee ? OperationType.UPDATE : OperationType.CREATE, 'employees');
+      console.error('Erro ao salvar funcionário:', err);
+      setError(err?.message || 'Erro ao salvar os dados do funcionário. Tente novamente.');
     } finally {
       setIsSubmitting(false);
     }
@@ -236,8 +239,8 @@ export function EmployeeModal({ isOpen, onClose, editingEmployee }: EmployeeModa
                   required
                   min="0"
                   step="0.01"
-                  value={formData.baseSalary}
-                  onChange={e => setFormData({ ...formData, baseSalary: Number(e.target.value) })}
+                  value={formData.baseSalary ?? ''}
+                  onChange={e => setFormData({ ...formData, baseSalary: e.target.value === '' ? ('' as any) : Number(e.target.value) })}
                   className="w-full rounded-xl border border-zinc-200 bg-zinc-50 px-4 py-2.5 text-sm focus:border-indigo-500 focus:outline-none focus:ring-4 focus:ring-indigo-500/10 transition-all font-bold"
                 />
               </div>
@@ -255,6 +258,22 @@ export function EmployeeModal({ isOpen, onClose, editingEmployee }: EmployeeModa
                 </select>
               </div>
             </div>
+
+            {formData.team === 'both' && (
+              <div className="p-3 bg-purple-50 border border-purple-200 rounded-xl text-xs text-purple-900 font-medium">
+                <p className="font-bold flex items-center gap-1.5 text-purple-950">
+                  <span>⚡🚀</span> Divisão 50/50 Habilitada
+                </p>
+                <p className="mt-1">
+                  O valor do salário base acima é o <strong>Salário Total</strong> do funcionário. Cada equipe assumirá exatamente a metade:
+                  <span className="font-bold text-purple-900 ml-1">
+                    {new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format((Number(formData.baseSalary) || 0) / 2)} para o Time Flash
+                  </span> e <span className="font-bold text-purple-900">
+                    {new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format((Number(formData.baseSalary) || 0) / 2)} para o Time Rapidão
+                  </span>.
+                </p>
+              </div>
+            )}
 
             {/* Admission and Dismissal Dates */}
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
@@ -330,22 +349,37 @@ export function EmployeeModal({ isOpen, onClose, editingEmployee }: EmployeeModa
           </div>
 
           {/* Actions */}
-          <div className="pt-4 flex gap-3 border-t border-zinc-100">
-            <button
-              type="button"
-              onClick={onClose}
-              className="flex-1 rounded-xl border border-zinc-200 py-3 text-sm font-bold text-zinc-500 hover:bg-zinc-50 transition-all active:scale-95"
-            >
-              Cancelar
-            </button>
-            <button
-              type="submit"
-              disabled={isSubmitting}
-              className="flex-1 flex items-center justify-center gap-2 rounded-xl bg-indigo-600 py-3 text-sm font-bold text-white hover:bg-indigo-700 transition-all shadow-lg shadow-indigo-600/15 disabled:opacity-50 active:scale-95"
-            >
-              <Save size={18} />
-              {isSubmitting ? 'Salvando...' : 'Salvar Funcionário'}
-            </button>
+          <div className="pt-4 flex flex-col sm:flex-row gap-3 border-t border-zinc-100">
+            {editingEmployee && !readOnly && onDelete && (
+              <button
+                type="button"
+                onClick={() => {
+                  onDelete(editingEmployee);
+                }}
+                className="rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm font-bold text-red-600 hover:bg-red-100 hover:border-red-300 transition-all flex items-center justify-center gap-2 active:scale-95"
+                title="Excluir este funcionário definitivamente"
+              >
+                <Trash2 size={16} />
+                <span>Excluir Funcionário</span>
+              </button>
+            )}
+            <div className="flex-1 flex gap-3">
+              <button
+                type="button"
+                onClick={onClose}
+                className="flex-1 rounded-xl border border-zinc-200 py-3 text-sm font-bold text-zinc-500 hover:bg-zinc-50 transition-all active:scale-95"
+              >
+                Cancelar
+              </button>
+              <button
+                type="submit"
+                disabled={isSubmitting}
+                className="flex-1 flex items-center justify-center gap-2 rounded-xl bg-indigo-600 py-3 text-sm font-bold text-white hover:bg-indigo-700 transition-all shadow-lg shadow-indigo-600/15 disabled:opacity-50 active:scale-95"
+              >
+                <Save size={18} />
+                {isSubmitting ? 'Salvando...' : 'Salvar Funcionário'}
+              </button>
+            </div>
           </div>
         </form>
       </div>

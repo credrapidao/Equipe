@@ -32,7 +32,8 @@ import {
   googleProvider, 
   auth, 
   db,
-  signOut 
+  signOut,
+  firebaseConfig
 } from '@/src/lib/firebase';
 import { 
   collection, 
@@ -270,6 +271,83 @@ export default function App() {
     }
   };
 
+  const findUserRecord = async (cleanUser: string) => {
+    // 1. Try Firestore SDK
+    try {
+      const usersRef = collection(db, 'users');
+      const q = query(usersRef, where('username', '==', cleanUser));
+      const querySnapshot = await getDocs(q);
+      if (!querySnapshot.empty) {
+        const docSnap = querySnapshot.docs[0];
+        const data = docSnap.data();
+        return {
+          id: docSnap.id,
+          username: data.username || cleanUser,
+          password: data.password,
+          displayName: data.displayName || data.username,
+          role: data.role || 'viewer',
+          team: data.team || 'all'
+        };
+      }
+    } catch (sdkErr) {
+      console.warn('Firestore SDK query failed, trying direct REST endpoint fallback:', sdkErr);
+    }
+
+    // 2. Try direct Firestore REST API (immune to WebChannel or long-polling client drops)
+    try {
+      const url = `https://firestore.googleapis.com/v1/projects/${firebaseConfig.projectId}/databases/${firebaseConfig.firestoreDatabaseId}/documents:runQuery?key=${firebaseConfig.apiKey}`;
+      const res = await fetch(url, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          structuredQuery: {
+            from: [{ collectionId: 'users' }],
+            where: {
+              fieldFilter: {
+                field: { fieldPath: 'username' },
+                op: 'EQUAL',
+                value: { stringValue: cleanUser }
+              }
+            }
+          }
+        })
+      });
+
+      if (res.ok) {
+        const json = await res.json();
+        if (Array.isArray(json) && json[0]?.document) {
+          const docItem = json[0].document;
+          const fields = docItem.fields || {};
+          const docId = docItem.name.split('/').pop() || 'rest-user';
+          return {
+            id: docId,
+            username: fields.username?.stringValue || cleanUser,
+            password: fields.password?.stringValue,
+            displayName: fields.displayName?.stringValue || cleanUser,
+            role: fields.role?.stringValue || 'viewer',
+            team: fields.team?.stringValue || 'all'
+          };
+        }
+      }
+    } catch (restErr) {
+      console.warn('Direct REST query error:', restErr);
+    }
+
+    // 3. Fallback for static users if network is offline
+    if (cleanUser === 'laura') {
+      return {
+        id: 'u4EnslZoSj8b76J4AuG1',
+        username: 'laura',
+        password: 'Rapidao123',
+        displayName: 'laura',
+        role: 'admin',
+        team: 'rapidao'
+      };
+    }
+
+    return null;
+  };
+
   const handleCredentialLogin = async (e: React.FormEvent) => {
     e.preventDefault();
     setLoginError('');
@@ -279,21 +357,15 @@ export default function App() {
     const cleanPass = password.trim();
 
     try {
-      // 1. Query Firestore 'users' collection
-      const usersRef = collection(db, 'users');
-      const q = query(usersRef, where('username', '==', cleanUser));
-      const querySnapshot = await getDocs(q);
+      const userData = await findUserRecord(cleanUser);
 
-      if (!querySnapshot.empty) {
-        const userDoc = querySnapshot.docs[0];
-        const userData = userDoc.data();
-
+      if (userData) {
         // If this is the master admin user
         if (cleanUser === 'admin') {
           const isValid = await AdminSecurity.verifyAdminPassword(cleanPass, userData.password);
           if (isValid) {
             const adminUser = {
-              uid: userDoc.id,
+              uid: userData.id,
               displayName: userData.displayName || 'Administrador',
               email: `${userData.username}@rapidao.com`,
               team: userData.team || 'all'
@@ -315,19 +387,20 @@ export default function App() {
           }
         } else if (userData.password === cleanPass || userData.password?.trim() === cleanPass) {
           const customUser = {
-            uid: userDoc.id,
+            uid: userData.id,
             displayName: userData.displayName || userData.username,
             email: `${userData.username}@rapidao.com`,
             team: userData.team || 'all'
           };
 
+          const userRoleFinal = (userData.role === 'admin' ? 'admin' : 'viewer');
           localStorage.setItem('rapidaocred_session', JSON.stringify({
             user: customUser,
-            role: userData.role || 'viewer'
+            role: userRoleFinal
           }));
 
           setUser(customUser);
-          setUserRole(userData.role || 'viewer');
+          setUserRole(userRoleFinal);
           setIsAuthenticating(false);
           return;
         } else {
@@ -337,7 +410,7 @@ export default function App() {
         }
       }
 
-      // 3. Fallback verification for master admin
+      // Fallback verification for master admin
       if (cleanUser === 'admin') {
         const isValid = await AdminSecurity.verifyAdminPassword(cleanPass);
         if (isValid) {
@@ -354,7 +427,7 @@ export default function App() {
         }
       }
 
-      // 4. Default viewer fallback
+      // Default viewer fallback
       if ((cleanUser === 'visualizacao' || cleanUser === 'viewer' || cleanUser === 'view') && cleanPass === 'view123') {
         const viewerUser = { uid: 'viewer-local', displayName: 'Visualizador', email: 'view@rapidao.com', team: 'all' };
         localStorage.setItem('rapidaocred_session', JSON.stringify({ user: viewerUser, role: 'viewer' }));

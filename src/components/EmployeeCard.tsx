@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { User, Phone, Edit, CheckCircle2, XCircle, Coins, Key, Copy, Check, Calendar, Eye, EyeOff, Shield } from 'lucide-react';
+import { User, Phone, Edit, CheckCircle2, XCircle, Coins, Key, Copy, Check, Calendar, Eye, EyeOff, Shield, Trash2 } from 'lucide-react';
 import { Employee } from '../types';
 import { SecurityMasker } from '../lib/security';
 
@@ -7,9 +7,11 @@ interface EmployeeCardProps {
   key?: string;
   employee: Employee;
   onEdit: (employee: Employee) => void;
+  onDelete?: (employee: Employee) => void;
+  readOnly?: boolean;
 }
 
-export function EmployeeCard({ employee, onEdit }: EmployeeCardProps) {
+export function EmployeeCard({ employee, onEdit, onDelete, readOnly }: EmployeeCardProps) {
   const [copied, setCopied] = useState(false);
   const [showSensitive, setShowSensitive] = useState(false);
 
@@ -79,6 +81,15 @@ export function EmployeeCard({ employee, onEdit }: EmployeeCardProps) {
         >
           <Edit size={16} />
         </button>
+        {!readOnly && onDelete && (
+          <button 
+            onClick={() => onDelete(employee)}
+            className="p-2 rounded-xl bg-zinc-50 text-zinc-400 hover:text-red-600 hover:bg-red-50 transition-all duration-200 opacity-0 group-hover:opacity-100"
+            title="Excluir Funcionário"
+          >
+            <Trash2 size={16} />
+          </button>
+        )}
       </div>
 
       {/* Main Details */}
