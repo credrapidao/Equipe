@@ -3,6 +3,20 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
+export interface Team {
+  id: string;
+  name: string;
+  icon?: string;
+  color?: string; // e.g. 'indigo' | 'amber' | 'emerald' | 'blue' | 'purple' | 'rose' | 'teal'
+  isDefault?: boolean;
+  createdAt?: string;
+}
+
+export const DEFAULT_TEAMS: Team[] = [
+  { id: 'flash', name: 'Time Flash', icon: '⚡', color: 'indigo', isDefault: true },
+  { id: 'rapidao', name: 'Time Rapidão', icon: '🚀', color: 'amber', isDefault: true },
+];
+
 export interface Promoter {
   id: string;
   name: string;
@@ -12,7 +26,7 @@ export interface Promoter {
   phoneNumber?: string;
   defaultDailyRate: number;
   active: boolean;
-  team?: 'flash' | 'rapidao';
+  team?: 'flash' | 'rapidao' | string;
   createdAt?: string;
   updatedAt?: string;
 }
@@ -28,7 +42,7 @@ export interface Employee {
   phoneNumber?: string;
   baseSalary: number;
   active: boolean;
-  team?: 'flash' | 'rapidao' | 'both';
+  team?: 'flash' | 'rapidao' | 'both' | string;
   admissionDate?: string;
   dismissalDate?: string;
   createdAt?: string;

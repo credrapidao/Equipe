@@ -1,17 +1,19 @@
 import React, { useState, useEffect, useMemo } from 'react';
-import { Calendar, User, Trash2, Plus, AlertCircle, Coins, Search, Wallet, Copy, Check } from 'lucide-react';
+import { Calendar, User, Trash2, Plus, AlertCircle, Coins, Search, Wallet, Copy, Check, FileSpreadsheet } from 'lucide-react';
 import { db } from '../lib/firebase';
 import { collection, addDoc, deleteDoc, doc, updateDoc } from 'firebase/firestore';
-import { Employee, EmployeeAdvance, OperationType } from '../types';
+import { Employee, EmployeeAdvance, OperationType, Team } from '../types';
 import { handleFirestoreError } from '../lib/utils';
+import { exportEmployeeAdvancesToExcel } from '../lib/excelExport';
 
 interface EmployeeAdvanceManagerProps {
   employees: Employee[];
   allAdvances: EmployeeAdvance[];
   readOnly?: boolean;
+  teams?: Team[];
 }
 
-export function EmployeeAdvanceManager({ employees, allAdvances, readOnly }: EmployeeAdvanceManagerProps) {
+export function EmployeeAdvanceManager({ employees, allAdvances, readOnly, teams = [] }: EmployeeAdvanceManagerProps) {
   const [selectedEmployeeId, setSelectedEmployeeId] = useState<string>('');
   const [date, setDate] = useState<string>(new Date().toISOString().split('T')[0]);
   const [notes, setNotes] = useState<string>('Adiantamento quinzenal');
@@ -145,6 +147,24 @@ export function EmployeeAdvanceManager({ employees, allAdvances, readOnly }: Emp
       return empName.includes(searchQuery.toLowerCase()) || notesMatch;
     }).sort((a, b) => b.date.localeCompare(a.date));
   }, [allAdvances, searchQuery, employees]);
+
+  const pendingAdvancesCount = useMemo(() => {
+    return filteredAdvances.filter(a => a.status === 'pending').length;
+  }, [filteredAdvances]);
+
+  const handleExportExcel = () => {
+    const pendingOnly = filteredAdvances.filter(a => a.status === 'pending');
+    if (pendingOnly.length === 0) {
+      alert('Nenhum adiantamento pendente para exportar.');
+      return;
+    }
+    exportEmployeeAdvancesToExcel({
+      advances: pendingOnly,
+      employees,
+      teams,
+      title: 'Adiantamentos Pendentes de Funcionários',
+    });
+  };
 
   return (
     <div className="grid grid-cols-1 lg:grid-cols-3 gap-8 max-w-7xl mx-auto">
@@ -303,6 +323,16 @@ export function EmployeeAdvanceManager({ employees, allAdvances, readOnly }: Emp
             >
               {copiedPending ? <Check size={14} /> : <Copy size={14} />}
               <span>{copiedPending ? 'Copiado!' : 'Copiar Pendentes'}</span>
+            </button>
+
+            <button
+              onClick={handleExportExcel}
+              disabled={pendingAdvancesCount === 0}
+              className="flex items-center gap-1.5 px-3 py-2 rounded-xl text-xs font-bold transition-all border bg-emerald-50 text-emerald-700 border-emerald-200 hover:bg-emerald-100 disabled:opacity-50 shrink-0 shadow-xs"
+              title="Exportar apenas adiantamentos pendentes para Excel (.xlsx)"
+            >
+              <FileSpreadsheet size={14} />
+              <span>Exportar Pendentes ({pendingAdvancesCount})</span>
             </button>
 
             <div className="relative w-full sm:w-64">

@@ -34,6 +34,10 @@ service cloud.firestore {
       allow read, write: if true;
     }
 
+    match /teams/{teamId} {
+      allow read, write: if true;
+    }
+
     match /employees/{employeeId} {
       allow read: if true;
       allow create: if isValidEmployee(request.resource.data);

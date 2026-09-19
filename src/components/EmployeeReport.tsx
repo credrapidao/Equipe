@@ -1,12 +1,18 @@
 import React, { useState, useMemo } from 'react';
-import { Copy, Check, Calendar, Coins, UserCheck, AlertTriangle, Search, CheckCircle, FileSpreadsheet } from 'lucide-react';
-import { Employee, EmployeeAbsence, EmployeeAdvance } from '../types';
+import { Copy, Check, Calendar, Coins, UserCheck, AlertTriangle, Search, CheckCircle, FileSpreadsheet, Edit, Trash2, ArrowRightLeft, Users } from 'lucide-react';
+import { Employee, EmployeeAbsence, EmployeeAdvance, Team, DEFAULT_TEAMS } from '../types';
+import { getTeamDisplay, getTeamColorStyle } from '../lib/teams';
+import { exportEmployeeClosingToExcel } from '../lib/excelExport';
 
 interface EmployeeReportProps {
   employees: Employee[];
   allAbsences: EmployeeAbsence[];
   allAdvances: EmployeeAdvance[];
   readOnly?: boolean;
+  onEditEmployee?: (employee: Employee) => void;
+  onDeleteEmployee?: (employee: Employee) => void;
+  onTransferEmployee?: (employee: Employee) => void;
+  teams?: Team[];
 }
 
 const formatBRDate = (dateStr?: string) => {
@@ -43,84 +49,65 @@ const calculateWorkedDays = (emp: Employee, selectedYear: number, selectedMonth:
   let endDay = 30;
   let note = '';
 
-  // 1. Check admission date
   if (emp.admissionDate) {
     const adm = parseDateParts(emp.admissionDate);
     if (adm) {
       if (adm.year > selectedYear || (adm.year === selectedYear && adm.month > selectedMonth)) {
-        // Admitted in a future month relative to selected
-        return {
-          workedDays: 0,
-          dailyRate: emp.baseSalary / 30,
-          proportionalSalary: 0,
-          isPartialMonth: true,
-          note: `Não admitido neste mês (Admissão: ${formatBRDate(emp.admissionDate)})`
-        };
+        return { workedDays: 0, note: 'Não admitido no período' };
       }
       if (adm.year === selectedYear && adm.month === selectedMonth) {
-        // Admitted in this month
         startDay = Math.min(adm.day, 30);
-        note = `Admitido em ${formatBRDate(emp.admissionDate)}`;
+        note = `Admissão: ${formatBRDate(emp.admissionDate)}`;
       }
     }
   }
 
-  // 2. Check dismissal date (if applicable)
   if (emp.dismissalDate) {
     const dis = parseDateParts(emp.dismissalDate);
     if (dis) {
       if (dis.year < selectedYear || (dis.year === selectedYear && dis.month < selectedMonth)) {
-        // Dismissed before selected month
-        return {
-          workedDays: 0,
-          dailyRate: emp.baseSalary / 30,
-          proportionalSalary: 0,
-          isPartialMonth: true,
-          note: `Demitido em mês anterior (${formatBRDate(emp.dismissalDate)})`
-        };
+        return { workedDays: 0, note: 'Demitido antes do período' };
       }
       if (dis.year === selectedYear && dis.month === selectedMonth) {
-        // Dismissed in this month
         endDay = Math.min(dis.day, 30);
-        const disNote = `Demitido em ${formatBRDate(emp.dismissalDate)}`;
-        note = note ? `${note} | ${disNote}` : disNote;
+        note = note ? `${note} | Demissão: ${formatBRDate(emp.dismissalDate)}` : `Demissão: ${formatBRDate(emp.dismissalDate)}`;
       }
     }
   }
 
-  const workedDays = Math.max(0, endDay - startDay + 1);
-  const dailyRate = emp.baseSalary / 30;
-  const proportionalSalary = Math.round(dailyRate * workedDays * 100) / 100;
+  if (startDay > endDay) {
+    return { workedDays: 0, note: note || 'Período inválido' };
+  }
 
-  return {
-    workedDays,
-    dailyRate,
-    proportionalSalary,
-    isPartialMonth: workedDays < 30,
-    note
-  };
+  const workedDays = Math.max(0, Math.min(30, endDay - startDay + 1));
+  return { workedDays, note };
 };
 
-export function EmployeeReport({ employees, allAbsences, allAdvances, readOnly }: EmployeeReportProps) {
-  const today = new Date();
-  const currentYear = today.getFullYear();
-  const currentMonth = today.getMonth() + 1; // 1-12
-  const currentDay = today.getDate();
+export function EmployeeReport({
+  employees,
+  allAbsences,
+  allAdvances,
+  readOnly,
+  onEditEmployee,
+  onDeleteEmployee,
+  onTransferEmployee,
+  teams = DEFAULT_TEAMS,
+}: EmployeeReportProps) {
+  const currentDate = new Date();
+  const currentMonth = currentDate.getMonth() + 1;
+  const currentYear = currentDate.getFullYear();
 
-  // If in the first 15 days of the month (e.g. Aug 1 - Aug 15), default payroll closing to previous month (e.g. July)
-  const prevMonthValue = currentMonth === 1 ? 12 : currentMonth - 1;
-  const prevYearValue = currentMonth === 1 ? currentYear - 1 : currentYear;
+  const prevMonthDate = new Date(currentDate.getFullYear(), currentDate.getMonth() - 1, 1);
+  const prevMonthValue = prevMonthDate.getMonth() + 1;
+  const prevYearValue = prevMonthDate.getFullYear();
 
-  const defaultMonth = currentDay <= 15 ? prevMonthValue : currentMonth;
-  const defaultYear = currentDay <= 15 ? prevYearValue : currentYear;
-
-  const [selectedMonth, setSelectedMonth] = useState<number>(defaultMonth);
-  const [selectedYear, setSelectedYear] = useState<number>(defaultYear);
-  const [searchQuery, setSearchQuery] = useState('');
+  const [selectedMonth, setSelectedMonth] = useState<number>(prevMonthValue);
+  const [selectedYear, setSelectedYear] = useState<number>(prevYearValue);
   const [copiedId, setCopiedId] = useState<string | null>(null);
-  const [bulkCopied, setBulkCopied] = useState(false);
-  const [flashCopied, setFlashCopied] = useState(false);
-  const [rapidaoCopied, setRapidaoCopied] = useState(false);
+  const [copiedTeamId, setCopiedTeamId] = useState<string | null>(null);
+  const [bulkCopied, setBulkCopied] = useState<boolean>(false);
+  const [searchQuery, setSearchQuery] = useState('');
+  const [selectedTeamFilter, setSelectedTeamFilter] = useState<string>('all');
 
   const months = [
     { value: 1, label: 'Janeiro' },
@@ -139,120 +126,73 @@ export function EmployeeReport({ employees, allAbsences, allAdvances, readOnly }
 
   const years = Array.from({ length: 5 }, (_, i) => currentYear - 2 + i);
 
-  // Helper to format currency
   const formatCurrency = (val: number) => {
     return new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(val);
   };
 
-  // Process data for the selected month and year
+  // Calculate Salaries for each employee for the chosen month/year
   const employeeSalaries = useMemo(() => {
     return employees.map(emp => {
-      // Filter absences for selected month/year
+      const { workedDays, note } = calculateWorkedDays(emp, selectedYear, selectedMonth);
+
+      const dailyRate = emp.baseSalary / 30;
+      const proportionalSalary = (emp.baseSalary / 30) * workedDays;
+
+      // Filter Absences in selected month
       const empAbsences = allAbsences.filter(abs => {
         if (abs.employeeId !== emp.id) return false;
-        const [y, m] = abs.date.split('-');
-        return Number(y) === selectedYear && Number(m) === selectedMonth;
+        const parts = parseDateParts(abs.date);
+        if (!parts) return false;
+        return parts.month === selectedMonth && parts.year === selectedYear;
       });
 
-      // Filter advances for selected month/year
+      const absencesDiscountSum = empAbsences.reduce((sum, abs) => {
+        return sum + (abs.discount !== undefined ? abs.discount : dailyRate);
+      }, 0);
+
+      // Filter Advances in selected month
       const empAdvances = allAdvances.filter(adv => {
         if (adv.employeeId !== emp.id) return false;
-        const [y, m] = adv.date.split('-');
-        return Number(y) === selectedYear && Number(m) === selectedMonth;
+        const parts = parseDateParts(adv.date);
+        if (!parts) return false;
+        return parts.month === selectedMonth && parts.year === selectedYear;
       });
 
-      const { workedDays, dailyRate, proportionalSalary, isPartialMonth, note } = calculateWorkedDays(emp, selectedYear, selectedMonth);
-
-      const totalAbsencesDiscount = empAbsences.reduce((sum, abs) => sum + abs.discount, 0);
-      const totalAdvances = empAdvances.reduce((sum, adv) => sum + adv.amount, 0);
-      const netSalary = Math.max(0, Math.round((proportionalSalary - totalAbsencesDiscount - totalAdvances) * 100) / 100);
+      const totalAdvances = empAdvances.reduce((sum, adv) => sum + (adv.amount || 0), 0);
+      const netSalary = Math.max(0, proportionalSalary - absencesDiscountSum - totalAdvances);
 
       return {
         employee: emp,
         workedDays,
-        dailyRate,
-        proportionalSalary,
-        isPartialMonth,
         note,
+        proportionalSalary,
+        dailyRate,
         absencesCount: empAbsences.length,
-        totalAbsencesDiscount,
+        totalAbsencesDiscount: absencesDiscountSum,
+        advancesCount: empAdvances.length,
         totalAdvances,
         netSalary,
-        absencesList: empAbsences,
-        advancesList: empAdvances
+        absences: empAbsences,
+        advances: empAdvances
       };
     });
   }, [employees, allAbsences, allAdvances, selectedMonth, selectedYear]);
 
-  // Filter salaries by search query
+  // Filtered by search query
   const filteredSalaries = useMemo(() => {
     return employeeSalaries.filter(item => {
-      const nameMatch = item.employee.name.toLowerCase().includes(searchQuery.toLowerCase());
-      const docMatch = item.employee.document.toLowerCase().includes(searchQuery.toLowerCase());
+      const q = searchQuery.toLowerCase().trim();
+      if (!q) return true;
+      const nameMatch = item.employee.name.toLowerCase().includes(q);
+      const docMatch = item.employee.document.toLowerCase().includes(q);
       return nameMatch || docMatch;
     });
   }, [employeeSalaries, searchQuery]);
 
-  const flashSalaries = useMemo(() => {
-    return filteredSalaries
-      .filter(item => !item.employee.team || item.employee.team === 'flash' || item.employee.team === 'both')
-      .map(item => {
-        const isSplit = item.employee.team === 'both';
-        return {
-          ...item,
-          isSplit,
-          displayProportionalSalary: isSplit ? item.proportionalSalary / 2 : item.proportionalSalary,
-          displayAbsencesDiscount: isSplit ? item.totalAbsencesDiscount / 2 : item.totalAbsencesDiscount,
-          displayAdvances: isSplit ? item.totalAdvances / 2 : item.totalAdvances,
-          displayNetSalary: isSplit ? item.netSalary / 2 : item.netSalary,
-        };
-      });
-  }, [filteredSalaries]);
-
-  const rapidaoSalaries = useMemo(() => {
-    return filteredSalaries
-      .filter(item => item.employee.team === 'rapidao' || item.employee.team === 'both')
-      .map(item => {
-        const isSplit = item.employee.team === 'both';
-        return {
-          ...item,
-          isSplit,
-          displayProportionalSalary: isSplit ? item.proportionalSalary / 2 : item.proportionalSalary,
-          displayAbsencesDiscount: isSplit ? item.totalAbsencesDiscount / 2 : item.totalAbsencesDiscount,
-          displayAdvances: isSplit ? item.totalAdvances / 2 : item.totalAdvances,
-          displayNetSalary: isSplit ? item.netSalary / 2 : item.netSalary,
-        };
-      });
-  }, [filteredSalaries]);
-
-  const flashTotals = useMemo(() => {
-    return flashSalaries.reduce((totals, item) => {
-      if (!item.employee.active) return totals;
-      return {
-        totalBaseSalaries: totals.totalBaseSalaries + item.displayProportionalSalary,
-        totalAbsencesDiscount: totals.totalAbsencesDiscount + item.displayAbsencesDiscount,
-        totalAdvances: totals.totalAdvances + item.displayAdvances,
-        totalNetSalary: totals.totalNetSalary + item.displayNetSalary
-      };
-    }, { totalBaseSalaries: 0, totalAbsencesDiscount: 0, totalAdvances: 0, totalNetSalary: 0 });
-  }, [flashSalaries]);
-
-  const rapidaoTotals = useMemo(() => {
-    return rapidaoSalaries.reduce((totals, item) => {
-      if (!item.employee.active) return totals;
-      return {
-        totalBaseSalaries: totals.totalBaseSalaries + item.displayProportionalSalary,
-        totalAbsencesDiscount: totals.totalAbsencesDiscount + item.displayAbsencesDiscount,
-        totalAdvances: totals.totalAdvances + item.displayAdvances,
-        totalNetSalary: totals.totalNetSalary + item.displayNetSalary
-      };
-    }, { totalBaseSalaries: 0, totalAbsencesDiscount: 0, totalAdvances: 0, totalNetSalary: 0 });
-  }, [rapidaoSalaries]);
-
-  // Overall financial sums
+  // Overall financial sums across all active employees
   const reportTotals = useMemo(() => {
     return filteredSalaries.reduce((totals, item) => {
-      if (!item.employee.active) return totals; // Only count active in the card summaries
+      if (!item.employee.active) return totals;
       return {
         totalBaseSalaries: totals.totalBaseSalaries + item.proportionalSalary,
         totalAbsencesDiscount: totals.totalAbsencesDiscount + item.totalAbsencesDiscount,
@@ -262,10 +202,68 @@ export function EmployeeReport({ employees, allAbsences, allAdvances, readOnly }
     }, { totalBaseSalaries: 0, totalAbsencesDiscount: 0, totalAdvances: 0, totalNetSalary: 0 });
   }, [filteredSalaries]);
 
+  // Dynamic Map of Salaries per Team
+  const teamSalariesMap = useMemo(() => {
+    const map: Record<string, {
+      team: Team;
+      salaries: (typeof employeeSalaries[0] & {
+        isSplit: boolean;
+        displayProportionalSalary: number;
+        displayAbsencesDiscount: number;
+        displayAdvances: number;
+        displayNetSalary: number;
+      })[];
+      totals: {
+        totalBaseSalaries: number;
+        totalAbsencesDiscount: number;
+        totalAdvances: number;
+        totalNetSalary: number;
+      };
+    }> = {};
+
+    teams.forEach(t => {
+      const list = filteredSalaries
+        .filter(item => {
+          if (t.id === 'flash') {
+            return !item.employee.team || item.employee.team === 'flash' || item.employee.team === 'both';
+          }
+          if (t.id === 'rapidao') {
+            return item.employee.team === 'rapidao' || item.employee.team === 'both';
+          }
+          return item.employee.team === t.id;
+        })
+        .map(item => {
+          const isSplit = item.employee.team === 'both' && (t.id === 'flash' || t.id === 'rapidao');
+          return {
+            ...item,
+            isSplit,
+            displayProportionalSalary: isSplit ? item.proportionalSalary / 2 : item.proportionalSalary,
+            displayAbsencesDiscount: isSplit ? item.totalAbsencesDiscount / 2 : item.totalAbsencesDiscount,
+            displayAdvances: isSplit ? item.totalAdvances / 2 : item.totalAdvances,
+            displayNetSalary: isSplit ? item.netSalary / 2 : item.netSalary,
+          };
+        });
+
+      const totals = list.reduce((tot, item) => {
+        if (!item.employee.active) return tot;
+        return {
+          totalBaseSalaries: tot.totalBaseSalaries + item.displayProportionalSalary,
+          totalAbsencesDiscount: tot.totalAbsencesDiscount + item.displayAbsencesDiscount,
+          totalAdvances: tot.totalAdvances + item.displayAdvances,
+          totalNetSalary: tot.totalNetSalary + item.displayNetSalary
+        };
+      }, { totalBaseSalaries: 0, totalAbsencesDiscount: 0, totalAdvances: 0, totalNetSalary: 0 });
+
+      map[t.id] = { team: t, salaries: list, totals };
+    });
+
+    return map;
+  }, [filteredSalaries, teams]);
+
   // Format payment data for copying
-  const getPaymentText = (item: typeof employeeSalaries[0], teamFilter?: 'flash' | 'rapidao') => {
-    const isSplit = item.employee.team === 'both';
-    const netToPay = (isSplit && teamFilter) ? item.netSalary / 2 : item.netSalary;
+  const getPaymentText = (item: typeof employeeSalaries[0], teamId?: string) => {
+    const isSplit = item.employee.team === 'both' && (teamId === 'flash' || teamId === 'rapidao');
+    const netToPay = isSplit ? item.netSalary / 2 : item.netSalary;
 
     let text = `Nome: ${item.employee.name}`;
     if (item.employee.role) {
@@ -281,10 +279,10 @@ export function EmployeeReport({ employees, allAbsences, allAdvances, readOnly }
     return text;
   };
 
-  const handleCopySingle = (item: typeof employeeSalaries[0], teamFilter?: 'flash' | 'rapidao') => {
-    const text = getPaymentText(item, teamFilter);
+  const handleCopySingle = (item: typeof employeeSalaries[0], teamId?: string) => {
+    const text = getPaymentText(item, teamId);
     navigator.clipboard.writeText(text).then(() => {
-      setCopiedId(`${item.employee.id}_${teamFilter || 'all'}`);
+      setCopiedId(`${item.employee.id}_${teamId || 'all'}`);
       setTimeout(() => setCopiedId(null), 2000);
     });
   };
@@ -304,29 +302,58 @@ export function EmployeeReport({ employees, allAbsences, allAdvances, readOnly }
     });
   };
 
-  const handleCopyTeam = (team: 'flash' | 'rapidao') => {
-    const targetSalaries = team === 'flash' ? flashSalaries : rapidaoSalaries;
+  const handleCopyTeam = (teamId: string) => {
+    const entry = teamSalariesMap[teamId];
+    if (!entry) return;
+
+    const targetSalaries = entry.salaries;
     const activeSalaries = targetSalaries.filter(s => s.employee.active && s.displayNetSalary > 0);
     if (activeSalaries.length === 0) return;
 
     const monthLabel = months.find(m => m.value === selectedMonth)?.label;
-    const teamTitle = team === 'flash' ? 'TIME FLASH' : 'TIME RAPIDÃO';
-    const teamTotalNet = team === 'flash' ? flashTotals.totalNetSalary : rapidaoTotals.totalNetSalary;
+    const teamTitle = entry.team.name.toUpperCase();
+    const teamTotalNet = entry.totals.totalNetSalary;
 
     const textHeader = `FECHAMENTO - ${teamTitle} (${monthLabel}/${selectedYear})\n--------------------\n`;
-    const textBody = activeSalaries.map(item => getPaymentText(item, team)).join('\n\n');
+    const textBody = activeSalaries.map(item => getPaymentText(item, teamId)).join('\n\n');
     const textFooter = `\n--------------------\nTOTAL DA EQUIPE: ${formatCurrency(teamTotalNet)}`;
 
     navigator.clipboard.writeText(textHeader + textBody + textFooter).then(() => {
-      if (team === 'flash') {
-        setFlashCopied(true);
-        setTimeout(() => setFlashCopied(false), 2000);
-      } else {
-        setRapidaoCopied(true);
-        setTimeout(() => setRapidaoCopied(false), 2000);
-      }
+      setCopiedTeamId(teamId);
+      setTimeout(() => setCopiedTeamId(null), 2000);
     });
   };
+
+  const handleExportExcel = (teamId?: string) => {
+    const monthLabel = months.find(m => m.value === selectedMonth)?.label || `Mês ${selectedMonth}`;
+    if (teamId) {
+      const entry = teamSalariesMap[teamId];
+      if (!entry) return;
+      exportEmployeeClosingToExcel({
+        monthName: monthLabel,
+        monthNumber: selectedMonth,
+        year: selectedYear,
+        items: entry.salaries,
+        teams,
+        teamName: entry.team.name,
+      });
+    } else {
+      exportEmployeeClosingToExcel({
+        monthName: monthLabel,
+        monthNumber: selectedMonth,
+        year: selectedYear,
+        items: filteredSalaries,
+        teams,
+        teamName: 'Geral',
+      });
+    }
+  };
+
+  // Filtered list of teams to display
+  const displayedTeams = useMemo(() => {
+    if (selectedTeamFilter === 'all') return teams;
+    return teams.filter(t => t.id === selectedTeamFilter);
+  }, [teams, selectedTeamFilter]);
 
   return (
     <div className="max-w-7xl mx-auto space-y-6">
@@ -421,25 +448,31 @@ export function EmployeeReport({ employees, allAbsences, allAdvances, readOnly }
 
         {/* Copy Buttons */}
         <div className="flex flex-wrap items-center gap-2">
-          <button
-            onClick={() => handleCopyTeam('flash')}
-            disabled={flashSalaries.filter(s => s.employee.active && s.displayNetSalary > 0).length === 0}
-            className="flex items-center justify-center gap-1.5 rounded-xl bg-indigo-600 px-4 py-2.5 text-xs font-bold text-white hover:bg-indigo-700 transition-all shadow-sm active:scale-95 disabled:opacity-50"
-            title="Copiar folha de fechamento do Time Flash"
-          >
-            {flashCopied ? <CheckCircle size={15} /> : <Copy size={15} />}
-            <span>{flashCopied ? 'Flash Copiado!' : '⚡ Copiar Flash'}</span>
-          </button>
+          {teams.map(t => {
+            const entry = teamSalariesMap[t.id];
+            const hasActive = entry && entry.salaries.some(s => s.employee.active && s.displayNetSalary > 0);
+            const isCopied = copiedTeamId === t.id;
+            const tStyle = getTeamColorStyle(t.color);
 
-          <button
-            onClick={() => handleCopyTeam('rapidao')}
-            disabled={rapidaoSalaries.filter(s => s.employee.active && s.displayNetSalary > 0).length === 0}
-            className="flex items-center justify-center gap-1.5 rounded-xl bg-amber-600 px-4 py-2.5 text-xs font-bold text-white hover:bg-amber-700 transition-all shadow-sm active:scale-95 disabled:opacity-50"
-            title="Copiar folha de fechamento do Time Rapidão"
-          >
-            {rapidaoCopied ? <CheckCircle size={15} /> : <Copy size={15} />}
-            <span>{rapidaoCopied ? 'Rapidão Copiado!' : '🚀 Copiar Rapidão'}</span>
-          </button>
+            return (
+              <button
+                key={t.id}
+                onClick={() => handleCopyTeam(t.id)}
+                disabled={!hasActive}
+                className={`flex items-center justify-center gap-1.5 rounded-xl px-4 py-2.5 text-xs font-bold transition-all shadow-sm active:scale-95 disabled:opacity-50 ${
+                  t.id === 'flash' 
+                    ? 'bg-indigo-600 text-white hover:bg-indigo-700' 
+                    : t.id === 'rapidao' 
+                    ? 'bg-amber-600 text-white hover:bg-amber-700' 
+                    : `${tStyle.badge} hover:opacity-90`
+                }`}
+                title={`Copiar folha de fechamento de ${t.name}`}
+              >
+                {isCopied ? <CheckCircle size={15} /> : <Copy size={15} />}
+                <span>{isCopied ? `${t.name} Copiado!` : `${t.icon || '👥'} Copiar ${t.name}`}</span>
+              </button>
+            );
+          })}
 
           <button
             onClick={handleCopyBulk}
@@ -450,7 +483,60 @@ export function EmployeeReport({ employees, allAbsences, allAdvances, readOnly }
             {bulkCopied ? <CheckCircle size={15} /> : <Copy size={15} />}
             <span>{bulkCopied ? 'Geral Copiado!' : '📋 Copiar Geral'}</span>
           </button>
+
+          <button
+            onClick={() => handleExportExcel()}
+            disabled={filteredSalaries.length === 0}
+            className="flex items-center justify-center gap-1.5 rounded-xl bg-emerald-600 hover:bg-emerald-700 px-4 py-2.5 text-xs font-bold text-white transition-all shadow-sm active:scale-95 disabled:opacity-50"
+            title="Exportar Fechamento Geral para Planilha Excel (.xlsx)"
+          >
+            <FileSpreadsheet size={15} />
+            <span>Exportar Excel (.xlsx)</span>
+          </button>
         </div>
+      </div>
+
+      {/* Team Filter Tab selector */}
+      <div className="flex items-center gap-2 overflow-x-auto pb-1">
+        <span className="text-xs font-bold uppercase tracking-wider text-zinc-400 shrink-0">
+          Visualizar:
+        </span>
+        <button
+          type="button"
+          onClick={() => setSelectedTeamFilter('all')}
+          className={`px-3.5 py-1.5 rounded-xl text-xs font-bold transition-all shrink-0 ${
+            selectedTeamFilter === 'all'
+              ? 'bg-zinc-900 text-white shadow-xs'
+              : 'bg-white text-zinc-600 border border-zinc-200 hover:bg-zinc-50'
+          }`}
+        >
+          Todas as Equipes
+        </button>
+
+        {teams.map(t => {
+          const isSel = selectedTeamFilter === t.id;
+          const entry = teamSalariesMap[t.id];
+          const count = entry?.salaries?.length || 0;
+
+          return (
+            <button
+              key={t.id}
+              type="button"
+              onClick={() => setSelectedTeamFilter(t.id)}
+              className={`px-3.5 py-1.5 rounded-xl text-xs font-bold transition-all shrink-0 flex items-center gap-1.5 ${
+                isSel
+                  ? 'bg-indigo-600 text-white shadow-xs'
+                  : 'bg-white text-zinc-600 border border-zinc-200 hover:bg-zinc-50'
+              }`}
+            >
+              <span>{t.icon || '👥'}</span>
+              <span>{t.name}</span>
+              <span className={`text-[10px] px-1.5 py-0.2 rounded-full font-extrabold ${isSel ? 'bg-white/20 text-white' : 'bg-zinc-100 text-zinc-500'}`}>
+                {count}
+              </span>
+            </button>
+          );
+        })}
       </div>
 
       {/* Totals Cards (Active Employees Only) */}
@@ -506,363 +592,263 @@ export function EmployeeReport({ employees, allAbsences, allAdvances, readOnly }
 
       </div>
 
-      {/* Main Closing Sheet - Separated by Team */}
+      {/* Main Closing Sheets - Separated by Team Dynamically */}
       <div className="space-y-8">
-        {/* Table for Time Flash */}
-        <div className="bg-white rounded-2xl border border-zinc-100 shadow-sm overflow-hidden">
-          <div className="p-6 border-b border-zinc-100 bg-zinc-50/50 flex flex-col sm:flex-row sm:items-center justify-between gap-4">
-            <div>
-              <h3 className="font-bold text-zinc-900 text-base flex items-center gap-2">
-                <span className="text-indigo-600">⚡</span> Folha de Fechamento - Time Flash
-              </h3>
-              <p className="text-xs font-semibold text-zinc-500 mt-0.5">
-                Visualize e copie as informações dos funcionários mensalistas do Time Flash.
-              </p>
-            </div>
-            <div className="flex items-center gap-2 flex-wrap">
-              <button
-                onClick={() => handleCopyTeam('flash')}
-                disabled={flashSalaries.filter(s => s.employee.active && s.displayNetSalary > 0).length === 0}
-                className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white font-bold text-xs shadow-sm transition-all active:scale-95 disabled:opacity-50"
-                title="Copiar fechamento do Time Flash"
-              >
-                {flashCopied ? (
-                  <>
-                    <Check size={14} />
-                    <span>Flash Copiado!</span>
-                  </>
-                ) : (
-                  <>
-                    <Copy size={14} />
-                    <span>Copiar Fechamento Flash</span>
-                  </>
-                )}
-              </button>
+        {displayedTeams.map(team => {
+          const entry = teamSalariesMap[team.id];
+          const salaries = entry ? entry.salaries : [];
+          const totals = entry ? entry.totals : { totalBaseSalaries: 0, totalAbsencesDiscount: 0, totalAdvances: 0, totalNetSalary: 0 };
+          const tStyle = getTeamColorStyle(team.color);
+          const isCopied = copiedTeamId === team.id;
 
-              <span className="text-xs font-extrabold text-indigo-700 bg-indigo-50 border border-indigo-100 px-3 py-1.5 rounded-xl">
-                Custo Time Flash: {formatCurrency(flashTotals.totalNetSalary)}
-              </span>
-              <span className="text-xs font-bold text-zinc-400 bg-zinc-100 px-3 py-1.5 rounded-xl">
-                {flashSalaries.length} func.
-              </span>
-            </div>
-          </div>
+          return (
+            <div key={team.id} className="bg-white rounded-2xl border border-zinc-100 shadow-sm overflow-hidden">
+              {/* Header */}
+              <div className="p-6 border-b border-zinc-100 bg-zinc-50/50 flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+                <div>
+                  <h3 className="font-bold text-zinc-900 text-base flex items-center gap-2">
+                    <span>{team.icon || '👥'}</span> Folha de Fechamento - {team.name}
+                  </h3>
+                  <p className="text-xs font-semibold text-zinc-500 mt-0.5">
+                    Visualize e copie as informações dos funcionários mensalistas de {team.name}.
+                  </p>
+                </div>
+                <div className="flex items-center gap-2 flex-wrap">
+                  <button
+                    onClick={() => handleCopyTeam(team.id)}
+                    disabled={salaries.filter(s => s.employee.active && s.displayNetSalary > 0).length === 0}
+                    className={`flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-white font-bold text-xs shadow-sm transition-all active:scale-95 disabled:opacity-50 ${
+                      team.id === 'flash'
+                        ? 'bg-indigo-600 hover:bg-indigo-700'
+                        : team.id === 'rapidao'
+                        ? 'bg-amber-600 hover:bg-amber-700'
+                        : `${tStyle.badge} hover:opacity-90`
+                    }`}
+                    title={`Copiar fechamento de ${team.name}`}
+                  >
+                    {isCopied ? (
+                      <>
+                        <Check size={14} />
+                        <span>{team.name} Copiado!</span>
+                      </>
+                    ) : (
+                      <>
+                        <Copy size={14} />
+                        <span>Copiar Fechamento {team.name}</span>
+                      </>
+                    )}
+                  </button>
 
-          <div className="overflow-x-auto">
-            <table className="w-full text-left border-collapse">
-              <thead>
-                <tr className="bg-zinc-50/30 border-b border-zinc-100 text-[10px] font-bold uppercase tracking-wider text-zinc-400">
-                  <th className="px-6 py-4">Nome do Funcionário</th>
-                  <th className="px-6 py-4">CPF / Documento</th>
-                  <th className="px-6 py-4">Salário (Proporcional)</th>
-                  <th className="px-6 py-4">Faltas (Desconto)</th>
-                  <th className="px-6 py-4">Adiantamentos</th>
-                  <th className="px-6 py-4">Líquido a Receber</th>
-                  <th className="px-6 py-4 text-center">Dados de Pagamento</th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-zinc-100 text-xs font-medium text-zinc-600">
-                {flashSalaries.length === 0 ? (
-                  <tr>
-                    <td colSpan={7} className="text-center py-12 text-zinc-400 font-bold bg-zinc-50/20">
-                      Nenhum funcionário encontrado no Time Flash.
-                    </td>
-                  </tr>
-                ) : (
-                  flashSalaries.map(item => (
-                    <tr key={item.employee.id} className={`hover:bg-zinc-50/40 transition-colors ${!item.employee.active ? 'opacity-55 bg-zinc-50/10' : ''}`}>
-                      <td className="px-6 py-4.5">
-                        <div className="font-bold text-zinc-900 flex items-center gap-1.5 flex-wrap">
-                          <span>{item.employee.name}</span>
-                          {!item.employee.active && (
-                            <span className="text-[8px] uppercase tracking-wider bg-zinc-100 text-zinc-400 px-1.5 py-0.5 rounded font-bold border border-zinc-200">
-                              Inativo
-                            </span>
-                          )}
-                          {item.isSplit && (
-                            <span className="text-[8px] uppercase tracking-wider bg-purple-50 text-purple-700 px-1.5 py-0.5 rounded font-bold border border-purple-200">
-                              ⚡🚀 Rateio 50/50
-                            </span>
-                          )}
-                        </div>
-                        {(item.employee.role || item.employee.level) && (
-                          <div className="flex items-center gap-1.5 flex-wrap text-[11px] font-bold text-indigo-700 mt-0.5">
-                            {item.employee.role && <span>{item.employee.role}</span>}
-                            {item.employee.role && item.employee.level && <span className="text-zinc-300">•</span>}
-                            {item.employee.level && (
-                              <span className="bg-indigo-50 border border-indigo-100 text-indigo-700 px-1.5 py-0.5 rounded text-[9px] uppercase font-extrabold">
-                                {item.employee.level}
+                  <button
+                    onClick={() => handleExportExcel(team.id)}
+                    disabled={salaries.length === 0}
+                    className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs shadow-sm transition-all active:scale-95 disabled:opacity-50"
+                    title={`Exportar Fechamento de ${team.name} para Excel (.xlsx)`}
+                  >
+                    <FileSpreadsheet size={14} />
+                    <span>Excel {team.name}</span>
+                  </button>
+
+                  <span className={`text-xs font-extrabold ${tStyle.text} ${tStyle.bg} border ${tStyle.border} px-3 py-1.5 rounded-xl`}>
+                    Custo {team.name}: {formatCurrency(totals.totalNetSalary)}
+                  </span>
+                  <span className="text-xs font-bold text-zinc-400 bg-zinc-100 px-3 py-1.5 rounded-xl">
+                    {salaries.length} func.
+                  </span>
+                </div>
+              </div>
+
+              {/* Table */}
+              <div className="overflow-x-auto">
+                <table className="w-full text-left border-collapse">
+                  <thead>
+                    <tr className="bg-zinc-50/30 border-b border-zinc-100 text-[10px] font-bold uppercase tracking-wider text-zinc-400">
+                      <th className="px-6 py-4">Nome do Funcionário</th>
+                      <th className="px-6 py-4">CPF / Documento</th>
+                      <th className="px-6 py-4">Salário (Proporcional)</th>
+                      <th className="px-6 py-4">Faltas (Desconto)</th>
+                      <th className="px-6 py-4">Adiantamentos</th>
+                      <th className="px-6 py-4">Líquido a Receber</th>
+                      <th className="px-6 py-4 text-center">Dados de Pagamento</th>
+                      <th className="px-6 py-4 text-center">Ações</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-zinc-100 text-xs font-medium text-zinc-600">
+                    {salaries.length === 0 ? (
+                      <tr>
+                        <td colSpan={8} className="text-center py-12 text-zinc-400 font-bold bg-zinc-50/20">
+                          Nenhum funcionário encontrado em {team.name}.
+                        </td>
+                      </tr>
+                    ) : (
+                      salaries.map(item => (
+                        <tr key={item.employee.id} className={`hover:bg-zinc-50/40 transition-colors ${!item.employee.active ? 'opacity-55 bg-zinc-50/10' : ''}`}>
+                          <td className="px-6 py-4.5">
+                            <div className="font-bold text-zinc-900 flex items-center gap-1.5 flex-wrap">
+                              {onEditEmployee ? (
+                                <button
+                                  type="button"
+                                  onClick={() => onEditEmployee(item.employee)}
+                                  className="hover:text-indigo-600 transition-colors flex items-center gap-1.5 text-left font-bold"
+                                  title="Clique para editar este funcionário"
+                                >
+                                  <span>{item.employee.name}</span>
+                                  <Edit size={12} className="text-zinc-400 hover:text-indigo-600 shrink-0" />
+                                </button>
+                              ) : (
+                                <span>{item.employee.name}</span>
+                              )}
+                              {!item.employee.active && (
+                                <span className="text-[8px] uppercase tracking-wider bg-zinc-100 text-zinc-400 px-1.5 py-0.5 rounded font-bold border border-zinc-200">
+                                  Inativo
+                                </span>
+                              )}
+                              {item.isSplit && (
+                                <span className="text-[8px] uppercase tracking-wider bg-purple-50 text-purple-700 px-1.5 py-0.5 rounded font-bold border border-purple-200">
+                                  ⚡🚀 Rateio 50/50
+                                </span>
+                              )}
+                            </div>
+                            {(item.employee.role || item.employee.level) && (
+                              <div className="text-xs font-semibold text-zinc-500 mt-0.5 flex items-center gap-1.5 flex-wrap">
+                                {item.employee.role && <span>{item.employee.role}</span>}
+                                {item.employee.role && item.employee.level && <span className="text-zinc-300">•</span>}
+                                {item.employee.level && (
+                                  <span className="bg-zinc-100 text-zinc-600 px-1.5 py-0.5 rounded text-[10px] uppercase font-bold">
+                                    {item.employee.level}
+                                  </span>
+                                )}
+                              </div>
+                            )}
+                            <div className="text-[10px] text-zinc-400 mt-0.5 font-bold">Celular: {item.employee.phoneNumber || 'Não informado'}</div>
+                            {item.employee.admissionDate && (
+                              <div className="text-[10px] text-zinc-500 font-medium">
+                                Admissão: {formatBRDate(item.employee.admissionDate)}
+                              </div>
+                            )}
+                          </td>
+
+                          <td className="px-6 py-4.5 font-mono text-zinc-500 font-semibold">
+                            {item.employee.document}
+                          </td>
+
+                          <td className="px-6 py-4.5">
+                            <div className="font-extrabold text-zinc-900">
+                              {formatCurrency(item.displayProportionalSalary)}
+                            </div>
+                            <div className="text-[10px] font-bold text-zinc-500 mt-0.5">
+                              {item.workedDays}/30 dias {item.isSplit ? `(50% de ${formatCurrency(item.proportionalSalary)})` : item.workedDays < 30 ? `(Base: ${formatCurrency(item.employee.baseSalary)})` : ''}
+                            </div>
+                            {item.note && (
+                              <span className="inline-block mt-1 text-[9px] font-bold text-indigo-600 bg-indigo-50 px-1.5 py-0.5 rounded border border-indigo-100">
+                                {item.note}
                               </span>
                             )}
-                          </div>
-                        )}
-                        <div className="text-[10px] text-zinc-400 mt-0.5 font-bold">Celular: {item.employee.phoneNumber || 'Não informado'}</div>
-                        {item.employee.admissionDate && (
-                          <div className="text-[10px] text-zinc-500 font-medium">
-                            Admissão: {formatBRDate(item.employee.admissionDate)}
-                          </div>
-                        )}
-                      </td>
+                          </td>
 
-                      <td className="px-6 py-4.5 font-mono text-zinc-500 font-semibold">
-                        {item.employee.document}
-                      </td>
+                          <td className="px-6 py-4.5">
+                            {item.displayAbsencesDiscount > 0 ? (
+                              <div className="text-red-600">
+                                <span className="font-bold">-{formatCurrency(item.displayAbsencesDiscount)}</span>
+                                <span className="text-[10px] block text-red-500 font-bold font-mono">({item.absencesCount} {item.absencesCount === 1 ? 'falta' : 'faltas'})</span>
+                              </div>
+                            ) : (
+                              <span className="text-zinc-400 font-bold">-</span>
+                            )}
+                          </td>
 
-                      <td className="px-6 py-4.5">
-                        <div className="font-extrabold text-zinc-900">
-                          {formatCurrency(item.displayProportionalSalary)}
-                        </div>
-                        <div className="text-[10px] font-bold text-zinc-500 mt-0.5">
-                          {item.workedDays}/30 dias {item.isSplit ? `(50% de ${formatCurrency(item.proportionalSalary)})` : item.workedDays < 30 ? `(Base: ${formatCurrency(item.employee.baseSalary)})` : ''}
-                        </div>
-                        {item.note && (
-                          <span className="inline-block mt-1 text-[9px] font-bold text-indigo-600 bg-indigo-50 px-1.5 py-0.5 rounded border border-indigo-100">
-                            {item.note}
-                          </span>
-                        )}
-                      </td>
+                          <td className="px-6 py-4.5">
+                            {item.displayAdvances > 0 ? (
+                              <span className="text-amber-600 font-bold">
+                                -{formatCurrency(item.displayAdvances)}
+                              </span>
+                            ) : (
+                              <span className="text-zinc-400 font-bold">-</span>
+                            )}
+                          </td>
 
-                      <td className="px-6 py-4.5">
-                        {item.displayAbsencesDiscount > 0 ? (
-                          <div className="text-red-600">
-                            <span className="font-bold">-{formatCurrency(item.displayAbsencesDiscount)}</span>
-                            <span className="text-[10px] block text-red-500 font-bold font-mono">({item.absencesCount} {item.absencesCount === 1 ? 'falta' : 'faltas'})</span>
-                          </div>
-                        ) : (
-                          <span className="text-zinc-400 font-bold">-</span>
-                        )}
-                      </td>
-
-                      <td className="px-6 py-4.5">
-                        {item.displayAdvances > 0 ? (
-                          <span className="text-amber-600 font-bold">
-                            -{formatCurrency(item.displayAdvances)}
-                          </span>
-                        ) : (
-                          <span className="text-zinc-400 font-bold">-</span>
-                        )}
-                      </td>
-
-                      <td className="px-6 py-4.5">
-                        <span className={`text-sm font-extrabold ${item.displayNetSalary > 0 ? 'text-emerald-700' : 'text-zinc-400'}`}>
-                          {formatCurrency(item.displayNetSalary)}
-                        </span>
-                        {item.isSplit && (
-                          <span className="block text-[9px] font-bold text-purple-600">
-                            (Total Pix: {formatCurrency(item.netSalary)})
-                          </span>
-                        )}
-                      </td>
-
-                      <td className="px-6 py-4.5 text-center">
-                        <button
-                          onClick={() => handleCopySingle(item, 'flash')}
-                          disabled={item.netSalary === 0}
-                          className={`inline-flex items-center justify-center gap-1.5 px-3 py-2 rounded-xl text-xs font-bold transition-all border shadow-sm ${
-                            copiedId === `${item.employee.id}_flash`
-                              ? 'bg-emerald-50 text-emerald-700 border-emerald-200'
-                              : 'bg-white text-zinc-700 border-zinc-200 hover:bg-zinc-50 active:scale-95 disabled:opacity-40'
-                          }`}
-                          title="Copiar dados formatados do funcionário"
-                        >
-                          {copiedId === `${item.employee.id}_flash` ? (
-                            <>
-                              <Check size={14} />
-                              <span>Copiado!</span>
-                            </>
-                          ) : (
-                            <>
-                              <Copy size={14} />
-                              <span>Copiar Pix</span>
-                            </>
-                          )}
-                        </button>
-                      </td>
-                    </tr>
-                  ))
-                )}
-              </tbody>
-            </table>
-          </div>
-        </div>
-
-        {/* Table for Time Rapidão */}
-        <div className="bg-white rounded-2xl border border-zinc-100 shadow-sm overflow-hidden">
-          <div className="p-6 border-b border-zinc-100 bg-zinc-50/50 flex flex-col sm:flex-row sm:items-center justify-between gap-4">
-            <div>
-              <h3 className="font-bold text-zinc-900 text-base flex items-center gap-2">
-                <span className="text-amber-500">🚀</span> Folha de Fechamento - Time Rapidão
-              </h3>
-              <p className="text-xs font-semibold text-zinc-500 mt-0.5">
-                Visualize e copie as informações dos funcionários mensalistas do Time Rapidão.
-              </p>
-            </div>
-            <div className="flex items-center gap-2 flex-wrap">
-              <button
-                onClick={() => handleCopyTeam('rapidao')}
-                disabled={rapidaoSalaries.filter(s => s.employee.active && s.displayNetSalary > 0).length === 0}
-                className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-amber-600 hover:bg-amber-700 text-white font-bold text-xs shadow-sm transition-all active:scale-95 disabled:opacity-50"
-                title="Copiar fechamento do Time Rapidão"
-              >
-                {rapidaoCopied ? (
-                  <>
-                    <Check size={14} />
-                    <span>Rapidão Copiado!</span>
-                  </>
-                ) : (
-                  <>
-                    <Copy size={14} />
-                    <span>Copiar Fechamento Rapidão</span>
-                  </>
-                )}
-              </button>
-
-              <span className="text-xs font-extrabold text-amber-700 bg-amber-50 border border-amber-100 px-3 py-1.5 rounded-xl">
-                Custo Time Rapidão: {formatCurrency(rapidaoTotals.totalNetSalary)}
-              </span>
-              <span className="text-xs font-bold text-zinc-400 bg-zinc-100 px-3 py-1.5 rounded-xl">
-                {rapidaoSalaries.length} func.
-              </span>
-            </div>
-          </div>
-
-          <div className="overflow-x-auto">
-            <table className="w-full text-left border-collapse">
-              <thead>
-                <tr className="bg-zinc-50/30 border-b border-zinc-100 text-[10px] font-bold uppercase tracking-wider text-zinc-400">
-                  <th className="px-6 py-4">Nome do Funcionário</th>
-                  <th className="px-6 py-4">CPF / Documento</th>
-                  <th className="px-6 py-4">Salário (Proporcional)</th>
-                  <th className="px-6 py-4">Faltas (Desconto)</th>
-                  <th className="px-6 py-4">Adiantamentos</th>
-                  <th className="px-6 py-4">Líquido a Receber</th>
-                  <th className="px-6 py-4 text-center">Dados de Pagamento</th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-zinc-100 text-xs font-medium text-zinc-600">
-                {rapidaoSalaries.length === 0 ? (
-                  <tr>
-                    <td colSpan={7} className="text-center py-12 text-zinc-400 font-bold bg-zinc-50/20">
-                      Nenhum funcionário encontrado no Time Rapidão.
-                    </td>
-                  </tr>
-                ) : (
-                  rapidaoSalaries.map(item => (
-                    <tr key={item.employee.id} className={`hover:bg-zinc-50/40 transition-colors ${!item.employee.active ? 'opacity-55 bg-zinc-50/10' : ''}`}>
-                      <td className="px-6 py-4.5">
-                        <div className="font-bold text-zinc-900 flex items-center gap-1.5 flex-wrap">
-                          <span>{item.employee.name}</span>
-                          {!item.employee.active && (
-                            <span className="text-[8px] uppercase tracking-wider bg-zinc-100 text-zinc-400 px-1.5 py-0.5 rounded font-bold border border-zinc-200">
-                              Inativo
+                          <td className="px-6 py-4.5">
+                            <span className={`text-sm font-extrabold ${item.displayNetSalary > 0 ? 'text-emerald-700' : 'text-zinc-400'}`}>
+                              {formatCurrency(item.displayNetSalary)}
                             </span>
-                          )}
-                          {item.isSplit && (
-                            <span className="text-[8px] uppercase tracking-wider bg-purple-50 text-purple-700 px-1.5 py-0.5 rounded font-bold border border-purple-200">
-                              ⚡🚀 Rateio 50/50
-                            </span>
-                          )}
-                        </div>
-                        {(item.employee.role || item.employee.level) && (
-                          <div className="flex items-center gap-1.5 flex-wrap text-[11px] font-bold text-amber-700 mt-0.5">
-                            {item.employee.role && <span>{item.employee.role}</span>}
-                            {item.employee.role && item.employee.level && <span className="text-zinc-300">•</span>}
-                            {item.employee.level && (
-                              <span className="bg-amber-50 border border-amber-100 text-amber-700 px-1.5 py-0.5 rounded text-[9px] uppercase font-extrabold">
-                                {item.employee.level}
+                            {item.isSplit && (
+                              <span className="block text-[9px] font-bold text-purple-600">
+                                (Total Pix: {formatCurrency(item.netSalary)})
                               </span>
                             )}
-                          </div>
-                        )}
-                        <div className="text-[10px] text-zinc-400 mt-0.5 font-bold">Celular: {item.employee.phoneNumber || 'Não informado'}</div>
-                        {item.employee.admissionDate && (
-                          <div className="text-[10px] text-zinc-500 font-medium">
-                            Admissão: {formatBRDate(item.employee.admissionDate)}
-                          </div>
-                        )}
-                      </td>
+                          </td>
 
-                      <td className="px-6 py-4.5 font-mono text-zinc-500 font-semibold">
-                        {item.employee.document}
-                      </td>
+                          <td className="px-6 py-4.5 text-center">
+                            <button
+                              onClick={() => handleCopySingle(item, team.id)}
+                              disabled={item.netSalary === 0}
+                              className={`inline-flex items-center justify-center gap-1.5 px-3 py-2 rounded-xl text-xs font-bold transition-all border shadow-sm ${
+                                copiedId === `${item.employee.id}_${team.id}`
+                                  ? 'bg-emerald-50 text-emerald-700 border-emerald-200'
+                                  : 'bg-white text-zinc-700 border-zinc-200 hover:bg-zinc-50 active:scale-95 disabled:opacity-40'
+                              }`}
+                              title="Copiar dados formatados do funcionário"
+                            >
+                              {copiedId === `${item.employee.id}_${team.id}` ? (
+                                <>
+                                  <Check size={14} />
+                                  <span>Copiado!</span>
+                                </>
+                              ) : (
+                                <>
+                                  <Copy size={14} />
+                                  <span>Copiar Pix</span>
+                                </>
+                              )}
+                            </button>
+                          </td>
 
-                      <td className="px-6 py-4.5">
-                        <div className="font-extrabold text-zinc-900">
-                          {formatCurrency(item.displayProportionalSalary)}
-                        </div>
-                        <div className="text-[10px] font-bold text-zinc-500 mt-0.5">
-                          {item.workedDays}/30 dias {item.isSplit ? `(50% de ${formatCurrency(item.proportionalSalary)})` : item.workedDays < 30 ? `(Base: ${formatCurrency(item.employee.baseSalary)})` : ''}
-                        </div>
-                        {item.note && (
-                          <span className="inline-block mt-1 text-[9px] font-bold text-indigo-600 bg-indigo-50 px-1.5 py-0.5 rounded border border-indigo-100">
-                            {item.note}
-                          </span>
-                        )}
-                      </td>
-
-                      <td className="px-6 py-4.5">
-                        {item.displayAbsencesDiscount > 0 ? (
-                          <div className="text-red-600">
-                            <span className="font-bold">-{formatCurrency(item.displayAbsencesDiscount)}</span>
-                            <span className="text-[10px] block text-red-500 font-bold font-mono">({item.absencesCount} {item.absencesCount === 1 ? 'falta' : 'faltas'})</span>
-                          </div>
-                        ) : (
-                          <span className="text-zinc-400 font-bold">-</span>
-                        )}
-                      </td>
-
-                      <td className="px-6 py-4.5">
-                        {item.displayAdvances > 0 ? (
-                          <span className="text-amber-600 font-bold">
-                            -{formatCurrency(item.displayAdvances)}
-                          </span>
-                        ) : (
-                          <span className="text-zinc-400 font-bold">-</span>
-                        )}
-                      </td>
-
-                      <td className="px-6 py-4.5">
-                        <span className={`text-sm font-extrabold ${item.displayNetSalary > 0 ? 'text-emerald-700' : 'text-zinc-400'}`}>
-                          {formatCurrency(item.displayNetSalary)}
-                        </span>
-                        {item.isSplit && (
-                          <span className="block text-[9px] font-bold text-purple-600">
-                            (Total Pix: {formatCurrency(item.netSalary)})
-                          </span>
-                        )}
-                      </td>
-
-                      <td className="px-6 py-4.5 text-center">
-                        <button
-                          onClick={() => handleCopySingle(item, 'rapidao')}
-                          disabled={item.netSalary === 0}
-                          className={`inline-flex items-center justify-center gap-1.5 px-3 py-2 rounded-xl text-xs font-bold transition-all border shadow-sm ${
-                            copiedId === `${item.employee.id}_rapidao`
-                              ? 'bg-emerald-50 text-emerald-700 border-emerald-200'
-                              : 'bg-white text-zinc-700 border-zinc-200 hover:bg-zinc-50 active:scale-95 disabled:opacity-40'
-                          }`}
-                          title="Copiar dados formatados do funcionário"
-                        >
-                          {copiedId === `${item.employee.id}_rapidao` ? (
-                            <>
-                              <Check size={14} />
-                              <span>Copiado!</span>
-                            </>
-                          ) : (
-                            <>
-                              <Copy size={14} />
-                              <span>Copiar Pix</span>
-                            </>
-                          )}
-                        </button>
-                      </td>
-                    </tr>
-                  ))
-                )}
-              </tbody>
-            </table>
-          </div>
-        </div>
+                          <td className="px-6 py-4.5 text-center">
+                            <div className="flex items-center justify-center gap-1.5">
+                              {onTransferEmployee && !readOnly && (
+                                <button
+                                  type="button"
+                                  onClick={() => onTransferEmployee(item.employee)}
+                                  className="inline-flex items-center gap-1 px-2.5 py-1.5 text-xs font-bold text-amber-700 bg-amber-50 hover:bg-amber-100 active:scale-95 rounded-xl transition-all border border-amber-200 shadow-xs"
+                                  title="Transferir Funcionário para outra Equipe"
+                                >
+                                  <ArrowRightLeft size={13} />
+                                  <span>Transferir</span>
+                                </button>
+                              )}
+                              {onEditEmployee && (
+                                <button
+                                  type="button"
+                                  onClick={() => onEditEmployee(item.employee)}
+                                  className="inline-flex items-center gap-1 px-2.5 py-1.5 text-xs font-bold text-indigo-600 bg-indigo-50 hover:bg-indigo-100 active:scale-95 rounded-xl transition-all border border-indigo-100"
+                                  title="Editar Funcionário e Salário"
+                                >
+                                  <Edit size={13} />
+                                  <span>Editar</span>
+                                </button>
+                              )}
+                              {!readOnly && onDeleteEmployee && (
+                                <button
+                                  type="button"
+                                  onClick={() => onDeleteEmployee(item.employee)}
+                                  className="inline-flex items-center gap-1 px-2.5 py-1.5 text-xs font-bold text-red-600 bg-red-50 hover:bg-red-100 active:scale-95 rounded-xl transition-all border border-red-100"
+                                  title="Excluir Funcionário"
+                                >
+                                  <Trash2 size={13} />
+                                  <span>Excluir</span>
+                                </button>
+                              )}
+                            </div>
+                          </td>
+                        </tr>
+                      ))
+                    )}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          );
+        })}
       </div>
 
     </div>

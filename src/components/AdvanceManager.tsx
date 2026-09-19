@@ -4,12 +4,13 @@
  */
 
 import React, { useState, useEffect } from 'react';
-import { Wallet, Plus, Trash2, CheckCircle2, Clock, DollarSign, Copy, Check, PlusCircle, XCircle, Search } from 'lucide-react';
+import { Wallet, Plus, Trash2, CheckCircle2, Clock, DollarSign, Copy, Check, PlusCircle, XCircle, Search, FileSpreadsheet } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { db } from '../lib/firebase';
 import { collection, query, onSnapshot, addDoc, updateDoc, doc, deleteDoc, serverTimestamp, orderBy, where, limit, getDocs, writeBatch } from 'firebase/firestore';
 import { Promoter, Advance, OperationType } from '../types';
 import { handleFirestoreError, formatCurrency, formatDate } from '../lib/utils';
+import { exportPromoterAdvancesToExcel } from '../lib/excelExport';
 
 interface AdvanceManagerProps {
   promoters: Promoter[];
@@ -487,6 +488,19 @@ export default function AdvanceManager({ promoters, readOnly }: AdvanceManagerPr
     }
   };
 
+  const exportAdvancesToExcel = () => {
+    const pendingOnly = advances.filter(a => a.status === 'pending');
+    if (pendingOnly.length === 0) {
+      alert('Nenhum adiantamento pendente registrado para exportar.');
+      return;
+    }
+    exportPromoterAdvancesToExcel({
+      advances: pendingOnly,
+      promoters,
+      title: 'Adiantamentos Pendentes de Promotores',
+    });
+  };
+
   const registerAllWeeklyAdvances = async () => {
     if (processing) return;
     const candidates = promoters.map(p => ({ promoter: p, net: getPendingBalance(p.id) })).filter(item => item.net >= 0.01);
@@ -803,6 +817,13 @@ export default function AdvanceManager({ promoters, readOnly }: AdvanceManagerPr
                       <Copy size={12} /> Copiar Seleção ({selectedBalances.size})
                     </button>
                   )}
+                  <button 
+                    onClick={exportAdvancesToExcel} 
+                    className="text-xs font-bold text-emerald-700 bg-emerald-50 px-2.5 py-1 rounded-lg border border-emerald-200 hover:bg-emerald-100 flex items-center gap-1 transition-colors"
+                    title="Exportar adiantamentos pendentes para Excel (.xlsx)"
+                  >
+                    <FileSpreadsheet size={12} /> Exportar Pendentes (Excel)
+                  </button>
                 </div>
               </div>
             </div>
@@ -958,6 +979,13 @@ export default function AdvanceManager({ promoters, readOnly }: AdvanceManagerPr
                 className="bg-indigo-50 text-indigo-600 px-4 py-2 rounded-xl font-bold text-xs hover:bg-indigo-100 transition-all border border-indigo-200 flex items-center gap-2"
               >
                 <Copy size={14} /> Relatório de Pagos
+              </button>
+              <button 
+                onClick={exportAdvancesToExcel}
+                className="bg-emerald-50 text-emerald-700 px-4 py-2 rounded-xl font-bold text-xs hover:bg-emerald-100 transition-all border border-emerald-200 flex items-center gap-2 shadow-xs"
+                title="Exportar adiantamentos pendentes para Excel (.xlsx)"
+              >
+                <FileSpreadsheet size={14} /> Exportar Pendentes (.xlsx)
               </button>
               {promoters.some(p => getPendingBalance(p.id) > 0.01) && (
                 <button 

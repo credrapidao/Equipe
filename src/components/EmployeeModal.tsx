@@ -1,9 +1,8 @@
 import React, { useState, useEffect } from 'react';
-import { X, Save, AlertCircle, Trash2 } from 'lucide-react';
+import { X, Save, AlertCircle, Trash2, AlertTriangle } from 'lucide-react';
 import { db } from '../lib/firebase';
-import { collection, addDoc, updateDoc, doc, serverTimestamp } from 'firebase/firestore';
-import { Employee, OperationType } from '../types';
-import { handleFirestoreError } from '../lib/utils';
+import { collection, addDoc, updateDoc, doc, getDocs, writeBatch } from 'firebase/firestore';
+import { Employee, Team, DEFAULT_TEAMS } from '../types';
 
 interface EmployeeModalProps {
   isOpen: boolean;
@@ -11,9 +10,10 @@ interface EmployeeModalProps {
   editingEmployee?: Employee | null;
   onDelete?: (employee: Employee) => void;
   readOnly?: boolean;
+  teams?: Team[];
 }
 
-export function EmployeeModal({ isOpen, onClose, editingEmployee, onDelete, readOnly }: EmployeeModalProps) {
+export function EmployeeModal({ isOpen, onClose, editingEmployee, onDelete, readOnly, teams = DEFAULT_TEAMS }: EmployeeModalProps) {
   const [formData, setFormData] = useState({
     name: '',
     role: '',
@@ -29,9 +29,13 @@ export function EmployeeModal({ isOpen, onClose, editingEmployee, onDelete, read
     dismissalDate: ''
   });
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [isDeleting, setIsDeleting] = useState(false);
+  const [confirmingDelete, setConfirmingDelete] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
+    setConfirmingDelete(false);
+    setError(null);
     if (editingEmployee) {
       setFormData({
         name: editingEmployee.name,
@@ -74,12 +78,13 @@ export function EmployeeModal({ isOpen, onClose, editingEmployee, onDelete, read
 
     // Basic validation
     if (!formData.name.trim() || !formData.document.trim() || !formData.pixKey.trim()) {
-      setError('Por favor, preencha todos os campos obrigatórios.');
+      setError('Por favor, preencha todos os campos obrigatórios (Nome, CPF e Chave Pix).');
       setIsSubmitting(false);
       return;
     }
 
     try {
+      const parsedSalary = Number(formData.baseSalary);
       const dataToSave = {
         name: formData.name.trim(),
         role: formData.role.trim(),
@@ -87,9 +92,9 @@ export function EmployeeModal({ isOpen, onClose, editingEmployee, onDelete, read
         document: formData.document.trim(),
         pixKey: formData.pixKey.trim(),
         pixKeyType: formData.pixKeyType,
-        phoneNumber: formData.phoneNumber.trim(),
-        baseSalary: Number(formData.baseSalary) || 0,
-        active: formData.active,
+        phoneNumber: formData.phoneNumber.trim() || 'Não informado',
+        baseSalary: isNaN(parsedSalary) ? 0 : parsedSalary,
+        active: Boolean(formData.active),
         team: formData.team || 'flash',
         admissionDate: formData.admissionDate || '',
         dismissalDate: formData.dismissalDate || '',
@@ -116,27 +121,70 @@ export function EmployeeModal({ isOpen, onClose, editingEmployee, onDelete, read
     }
   };
 
+  const handleDeleteDirectly = async () => {
+    if (!editingEmployee || readOnly) return;
+    setIsDeleting(true);
+    setError(null);
+
+    try {
+      const absSnap = await getDocs(collection(db, `employees/${editingEmployee.id}/absences`));
+      const advSnap = await getDocs(collection(db, `employees/${editingEmployee.id}/advances`));
+
+      const batch = writeBatch(db);
+      absSnap.docs.forEach(d => batch.delete(d.ref));
+      advSnap.docs.forEach(d => batch.delete(d.ref));
+      batch.delete(doc(db, 'employees', editingEmployee.id));
+      await batch.commit();
+
+      if (onDelete) {
+        onDelete(editingEmployee);
+      }
+      onClose();
+    } catch (err: any) {
+      console.error('Erro ao excluir funcionário:', err);
+      setError(err?.message || 'Erro ao excluir o funcionário. Tente novamente.');
+      setIsDeleting(false);
+    }
+  };
+
+  const formattedCurrentSalary = new Intl.NumberFormat('pt-BR', {
+    style: 'currency',
+    currency: 'BRL'
+  }).format(Number(formData.baseSalary) || 0);
+
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-4 overflow-y-auto">
       {/* Backdrop */}
-      <div className="absolute inset-0 bg-zinc-950/40 backdrop-blur-sm" onClick={onClose} />
+      <div 
+        className="fixed inset-0 bg-zinc-950/50 backdrop-blur-sm transition-opacity" 
+        onClick={() => {
+          if (!isSubmitting && !isDeleting) onClose();
+        }} 
+      />
 
       {/* Modal Card */}
-      <div className="relative w-full max-w-xl rounded-2xl border border-zinc-100 bg-white p-6 shadow-2xl transition-all duration-300 flex flex-col max-h-[90vh]">
+      <div className="relative w-full max-w-xl rounded-2xl border border-zinc-100 bg-white shadow-2xl transition-all duration-300 flex flex-col max-h-[90vh] overflow-hidden my-auto z-10">
         
-        {/* Header */}
-        <div className="flex items-center justify-between pb-4 border-b border-zinc-100">
+        {/* Header (Always Visible) */}
+        <div className="flex items-center justify-between p-5 sm:p-6 pb-4 border-b border-zinc-100 bg-white shrink-0">
           <div>
-            <h3 className="text-xl font-bold text-zinc-900">
-              {editingEmployee ? 'Editar Funcionário' : 'Novo Funcionário'}
+            <h3 className="text-xl font-bold text-zinc-900 flex items-center gap-2">
+              <span>{editingEmployee ? 'Editar Funcionário' : 'Novo Funcionário'}</span>
+              {editingEmployee && (
+                <span className="text-xs px-2.5 py-0.5 rounded-full bg-indigo-50 text-indigo-700 font-bold border border-indigo-100">
+                  ID: {editingEmployee.id.slice(0, 6)}...
+                </span>
+              )}
             </h3>
             <p className="text-xs font-medium text-zinc-500 mt-1">
-              {editingEmployee ? 'Atualize as informações do funcionário.' : 'Cadastre um novo funcionário mensalista.'}
+              {editingEmployee ? `Alterando dados de ${formData.name || 'funcionário'}` : 'Cadastre um novo funcionário mensalista.'}
             </p>
           </div>
           <button 
+            type="button"
+            disabled={isSubmitting || isDeleting}
             onClick={onClose}
-            className="rounded-lg p-1.5 text-zinc-400 hover:bg-zinc-50 hover:text-zinc-600 transition-colors"
+            className="rounded-lg p-1.5 text-zinc-400 hover:bg-zinc-100 hover:text-zinc-600 transition-colors disabled:opacity-50"
           >
             <X size={20} />
           </button>
@@ -144,14 +192,18 @@ export function EmployeeModal({ isOpen, onClose, editingEmployee, onDelete, read
 
         {/* Error Alert */}
         {error && (
-          <div className="mt-4 flex items-start gap-2.5 rounded-xl bg-red-50 p-4 text-red-800 border border-red-100">
+          <div className="mx-6 mt-4 flex items-start gap-2.5 rounded-xl bg-red-50 p-3.5 text-red-800 border border-red-200 text-xs font-bold">
             <AlertCircle size={18} className="shrink-0 mt-0.5" />
-            <div className="text-sm font-medium">{error}</div>
+            <div className="flex-1">{error}</div>
           </div>
         )}
 
-        {/* Form */}
-        <form onSubmit={handleSubmit} className="flex-1 overflow-y-auto py-4 space-y-4 pr-1">
+        {/* Scrollable Form Body */}
+        <form 
+          id="employee-modal-form" 
+          onSubmit={handleSubmit} 
+          className="flex-1 overflow-y-auto p-5 sm:p-6 py-4 space-y-4"
+        >
           <div className="space-y-4">
             
             {/* Name */}
@@ -214,7 +266,7 @@ export function EmployeeModal({ isOpen, onClose, editingEmployee, onDelete, read
                   value={formData.document}
                   onChange={e => setFormData({ ...formData, document: e.target.value })}
                   placeholder="Ex: 000.000.000-00"
-                  className="w-full rounded-xl border border-zinc-200 bg-zinc-50 px-4 py-2.5 text-sm focus:border-indigo-500 focus:outline-none focus:ring-4 focus:ring-indigo-500/10 transition-all font-medium"
+                  className="w-full rounded-xl border border-zinc-200 bg-zinc-50 px-4 py-2.5 text-sm focus:border-indigo-500 focus:outline-none focus:ring-4 focus:ring-indigo-500/10 transition-all font-medium font-mono"
                 />
               </div>
 
@@ -233,7 +285,12 @@ export function EmployeeModal({ isOpen, onClose, editingEmployee, onDelete, read
             {/* Base Salary and Team */}
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
               <div className="space-y-1.5">
-                <label className="text-xs font-bold uppercase tracking-wider text-zinc-500">Salário Base Mensal (R$) *</label>
+                <div className="flex items-center justify-between">
+                  <label className="text-xs font-bold uppercase tracking-wider text-zinc-500">Salário Base Mensal (R$) *</label>
+                  <span className="text-[11px] font-extrabold text-emerald-700 bg-emerald-50 px-2 py-0.5 rounded border border-emerald-100">
+                    {formattedCurrentSalary}
+                  </span>
+                </div>
                 <input 
                   type="number"
                   required
@@ -252,8 +309,11 @@ export function EmployeeModal({ isOpen, onClose, editingEmployee, onDelete, read
                   onChange={e => setFormData({ ...formData, team: e.target.value as Employee['team'] })}
                   className="w-full rounded-xl border border-zinc-200 bg-zinc-50 px-4 py-2.5 text-sm focus:border-indigo-500 focus:outline-none focus:ring-4 focus:ring-indigo-500/10 transition-all font-bold"
                 >
-                  <option value="flash">⚡ Time Flash (100%)</option>
-                  <option value="rapidao">🚀 Time Rapidão (100%)</option>
+                  {teams.map(t => (
+                    <option key={t.id} value={t.id}>
+                      {t.icon || '👥'} {t.name} (100%)
+                    </option>
+                  ))}
                   <option value="both">⚡🚀 Ambas as Equipes (50% Flash / 50% Rapidão)</option>
                 </select>
               </div>
@@ -308,25 +368,36 @@ export function EmployeeModal({ isOpen, onClose, editingEmployee, onDelete, read
                   <select 
                     value={formData.pixKeyType}
                     onChange={e => setFormData({ ...formData, pixKeyType: e.target.value as Employee['pixKeyType'] })}
-                    className="w-full rounded-xl border border-zinc-200 bg-white px-4 py-2.5 text-sm focus:border-indigo-500 focus:outline-none focus:ring-4 focus:ring-indigo-500/10 transition-all font-bold"
+                    className="w-full rounded-xl border border-zinc-200 bg-white px-3 py-2 text-xs focus:border-indigo-500 focus:outline-none focus:ring-4 focus:ring-indigo-500/10 transition-all font-bold"
                   >
                     <option value="CPF">CPF</option>
                     <option value="CNPJ">CNPJ</option>
                     <option value="Email">E-mail</option>
-                    <option value="Phone">Celular</option>
-                    <option value="Random">Chave Aleatória</option>
+                    <option value="Phone">Telefone / Celular</option>
+                    <option value="Random">Chave Aleatória (EVP)</option>
                   </select>
                 </div>
 
                 <div className="space-y-1.5">
-                  <label className="text-[10px] font-bold uppercase tracking-wider text-zinc-500">Chave Pix *</label>
+                  <div className="flex items-center justify-between">
+                    <label className="text-[10px] font-bold uppercase tracking-wider text-zinc-500">Chave Pix *</label>
+                    {formData.pixKeyType === 'CPF' && formData.document && (
+                      <button
+                        type="button"
+                        onClick={() => setFormData({ ...formData, pixKey: formData.document })}
+                        className="text-[10px] font-bold text-indigo-600 hover:text-indigo-800"
+                      >
+                        Copiar do CPF
+                      </button>
+                    )}
+                  </div>
                   <input 
                     type="text"
                     required
                     value={formData.pixKey}
                     onChange={e => setFormData({ ...formData, pixKey: e.target.value })}
-                    placeholder="Insira a chave pix"
-                    className="w-full rounded-xl border border-zinc-200 bg-white px-4 py-2.5 text-sm focus:border-indigo-500 focus:outline-none focus:ring-4 focus:ring-indigo-500/10 transition-all font-medium"
+                    placeholder="Chave Pix para depósito"
+                    className="w-full rounded-xl border border-zinc-200 bg-white px-3 py-2 text-xs focus:border-indigo-500 focus:outline-none focus:ring-4 focus:ring-indigo-500/10 transition-all font-medium font-mono"
                   />
                 </div>
               </div>
@@ -342,46 +413,82 @@ export function EmployeeModal({ isOpen, onClose, editingEmployee, onDelete, read
                 className="h-4 w-4 rounded border-zinc-300 text-indigo-600 focus:ring-indigo-500"
               />
               <label htmlFor="active" className="text-sm font-bold text-zinc-700 select-none cursor-pointer">
-                Funcionário Ativo
+                Funcionário Ativo (Aparece no Fechamento do Mês)
               </label>
             </div>
 
           </div>
-
-          {/* Actions */}
-          <div className="pt-4 flex flex-col sm:flex-row gap-3 border-t border-zinc-100">
-            {editingEmployee && !readOnly && onDelete && (
-              <button
-                type="button"
-                onClick={() => {
-                  onDelete(editingEmployee);
-                }}
-                className="rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm font-bold text-red-600 hover:bg-red-100 hover:border-red-300 transition-all flex items-center justify-center gap-2 active:scale-95"
-                title="Excluir este funcionário definitivamente"
-              >
-                <Trash2 size={16} />
-                <span>Excluir Funcionário</span>
-              </button>
-            )}
-            <div className="flex-1 flex gap-3">
-              <button
-                type="button"
-                onClick={onClose}
-                className="flex-1 rounded-xl border border-zinc-200 py-3 text-sm font-bold text-zinc-500 hover:bg-zinc-50 transition-all active:scale-95"
-              >
-                Cancelar
-              </button>
-              <button
-                type="submit"
-                disabled={isSubmitting}
-                className="flex-1 flex items-center justify-center gap-2 rounded-xl bg-indigo-600 py-3 text-sm font-bold text-white hover:bg-indigo-700 transition-all shadow-lg shadow-indigo-600/15 disabled:opacity-50 active:scale-95"
-              >
-                <Save size={18} />
-                {isSubmitting ? 'Salvando...' : 'Salvar Funcionário'}
-              </button>
-            </div>
-          </div>
         </form>
+
+        {/* Fixed Sticky Footer (Always in View, never hidden by scroll) */}
+        <div className="p-4 sm:p-5 border-t border-zinc-100 bg-zinc-50/90 shrink-0 flex flex-col gap-3">
+          {confirmingDelete ? (
+            <div className="p-3 bg-red-50 border border-red-200 rounded-xl space-y-2">
+              <div className="flex items-center gap-2 text-xs font-bold text-red-900">
+                <AlertTriangle size={16} className="text-red-600 shrink-0" />
+                <span>Confirmar exclusão definitiva de <strong>{formData.name}</strong>?</span>
+              </div>
+              <p className="text-[11px] text-red-700">
+                Esta ação apagará permanentemente o cadastro e todas as faltas e adiantamentos vinculados.
+              </p>
+              <div className="flex items-center gap-2 pt-1">
+                <button
+                  type="button"
+                  disabled={isDeleting}
+                  onClick={() => setConfirmingDelete(false)}
+                  className="flex-1 rounded-xl border border-zinc-200 bg-white py-2 text-xs font-bold text-zinc-600 hover:bg-zinc-50 transition-all active:scale-95 disabled:opacity-50"
+                >
+                  Cancelar
+                </button>
+                <button
+                  type="button"
+                  disabled={isDeleting}
+                  onClick={handleDeleteDirectly}
+                  className="flex-1 flex items-center justify-center gap-1.5 rounded-xl bg-red-600 py-2 text-xs font-bold text-white hover:bg-red-700 transition-all shadow-md active:scale-95 disabled:opacity-50"
+                >
+                  <Trash2 size={14} />
+                  <span>{isDeleting ? 'Excluindo...' : 'Sim, Excluir Definitivamente'}</span>
+                </button>
+              </div>
+            </div>
+          ) : (
+            <div className="flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-3">
+              {editingEmployee && !readOnly ? (
+                <button
+                  type="button"
+                  disabled={isSubmitting}
+                  onClick={() => setConfirmingDelete(true)}
+                  className="rounded-xl border border-red-200 bg-red-50 px-4 py-2.5 text-xs font-bold text-red-600 hover:bg-red-100 hover:border-red-300 transition-all flex items-center justify-center gap-1.5 active:scale-95 disabled:opacity-50"
+                  title="Excluir este funcionário definitivamente"
+                >
+                  <Trash2 size={14} />
+                  <span>Excluir Funcionário</span>
+                </button>
+              ) : <div />}
+
+              <div className="flex items-center gap-2.5">
+                <button
+                  type="button"
+                  disabled={isSubmitting}
+                  onClick={onClose}
+                  className="flex-1 sm:flex-none px-4 py-2.5 rounded-xl border border-zinc-200 text-xs font-bold text-zinc-600 hover:bg-zinc-100 transition-all active:scale-95 disabled:opacity-50"
+                >
+                  Cancelar
+                </button>
+                <button
+                  type="submit"
+                  form="employee-modal-form"
+                  disabled={isSubmitting}
+                  className="flex-1 sm:flex-none flex items-center justify-center gap-2 rounded-xl bg-indigo-600 px-6 py-2.5 text-xs font-bold text-white hover:bg-indigo-700 transition-all shadow-lg shadow-indigo-600/15 disabled:opacity-50 active:scale-95"
+                >
+                  <Save size={15} />
+                  <span>{isSubmitting ? 'Salvando...' : 'Salvar Funcionário'}</span>
+                </button>
+              </div>
+            </div>
+          )}
+        </div>
+
       </div>
     </div>
   );

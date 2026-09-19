@@ -1,17 +1,20 @@
 import React, { useState } from 'react';
-import { User, Phone, Edit, CheckCircle2, XCircle, Coins, Key, Copy, Check, Calendar, Eye, EyeOff, Shield, Trash2 } from 'lucide-react';
-import { Employee } from '../types';
+import { User, Phone, Edit, CheckCircle2, XCircle, Coins, Key, Copy, Check, Calendar, Eye, EyeOff, Shield, Trash2, ArrowRightLeft } from 'lucide-react';
+import { Employee, Team, DEFAULT_TEAMS } from '../types';
 import { SecurityMasker } from '../lib/security';
+import { getTeamDisplay, getTeamColorStyle } from '../lib/teams';
 
 interface EmployeeCardProps {
   key?: string;
   employee: Employee;
   onEdit: (employee: Employee) => void;
   onDelete?: (employee: Employee) => void;
+  onTransfer?: (employee: Employee) => void;
   readOnly?: boolean;
+  teams?: Team[];
 }
 
-export function EmployeeCard({ employee, onEdit, onDelete, readOnly }: EmployeeCardProps) {
+export function EmployeeCard({ employee, onEdit, onDelete, onTransfer, readOnly, teams = DEFAULT_TEAMS }: EmployeeCardProps) {
   const [copied, setCopied] = useState(false);
   const [showSensitive, setShowSensitive] = useState(false);
 
@@ -81,6 +84,15 @@ export function EmployeeCard({ employee, onEdit, onDelete, readOnly }: EmployeeC
         >
           <Edit size={16} />
         </button>
+        {!readOnly && onTransfer && (
+          <button 
+            onClick={() => onTransfer(employee)}
+            className="p-2 rounded-xl bg-zinc-50 text-zinc-400 hover:text-amber-600 hover:bg-amber-50 transition-all duration-200 opacity-0 group-hover:opacity-100"
+            title="Transferir de Equipe"
+          >
+            <ArrowRightLeft size={16} />
+          </button>
+        )}
         {!readOnly && onDelete && (
           <button 
             onClick={() => onDelete(employee)}
@@ -181,19 +193,16 @@ export function EmployeeCard({ employee, onEdit, onDelete, readOnly }: EmployeeC
             </div>
           )}
 
-          {employee.team === 'both' ? (
-            <div className="flex items-center gap-1 px-2.5 py-0.5 rounded-full bg-purple-50 text-purple-700 text-[10px] font-bold uppercase tracking-wider border border-purple-100">
-              ⚡🚀 50% Flash / 50% Rapidão
-            </div>
-          ) : employee.team === 'rapidao' ? (
-            <div className="flex items-center gap-1 px-2.5 py-0.5 rounded-full bg-amber-50 text-amber-700 text-[10px] font-bold uppercase tracking-wider border border-amber-100">
-              🚀 Rapidão
-            </div>
-          ) : (
-            <div className="flex items-center gap-1 px-2.5 py-0.5 rounded-full bg-indigo-50 text-indigo-700 text-[10px] font-bold uppercase tracking-wider border border-indigo-100">
-              ⚡ Flash
-            </div>
-          )}
+          {(() => {
+            const tDisplay = getTeamDisplay(employee.team, teams);
+            const tStyle = getTeamColorStyle(tDisplay.color);
+            return (
+              <div className={`flex items-center gap-1 px-2.5 py-0.5 rounded-full ${tStyle.bg} ${tStyle.text} text-[10px] font-bold uppercase tracking-wider border ${tStyle.border}`}>
+                <span>{tDisplay.icon}</span>
+                <span>{tDisplay.name}</span>
+              </div>
+            );
+          })()}
         </div>
         <div className="text-[10px] font-bold text-zinc-400 uppercase tracking-tighter flex items-center gap-1">
           <Shield size={10} className="text-indigo-500" />
