@@ -149,11 +149,14 @@ export function EmployeeAdvanceManager({ employees, allAdvances, readOnly, teams
   }, [allAdvances, searchQuery, employees]);
 
   const pendingAdvancesCount = useMemo(() => {
-    return filteredAdvances.filter(a => a.status === 'pending').length;
-  }, [filteredAdvances]);
+    return (searchQuery.trim() ? filteredAdvances : allAdvances).filter(a => a.status === 'pending').length;
+  }, [filteredAdvances, allAdvances, searchQuery]);
 
   const handleExportExcel = () => {
-    const pendingOnly = filteredAdvances.filter(a => a.status === 'pending');
+    let pendingOnly = (searchQuery.trim() ? filteredAdvances : allAdvances).filter(a => a.status === 'pending');
+    if (pendingOnly.length === 0) {
+      pendingOnly = allAdvances.filter(a => a.status === 'pending');
+    }
     if (pendingOnly.length === 0) {
       alert('Nenhum adiantamento pendente para exportar.');
       return;

@@ -10,7 +10,7 @@ import { db } from '../lib/firebase';
 import { collection, query, onSnapshot, addDoc, updateDoc, doc, deleteDoc, serverTimestamp, orderBy, where, limit, getDocs, writeBatch } from 'firebase/firestore';
 import { Promoter, Advance, OperationType } from '../types';
 import { handleFirestoreError, formatCurrency, formatDate } from '../lib/utils';
-import { exportPromoterAdvancesToExcel } from '../lib/excelExport';
+import { exportPromoterAdvancesToExcel, exportBatchPaymentToExcel, BatchPaymentRow, roundCurrency } from '../lib/excelExport';
 
 interface AdvanceManagerProps {
   promoters: Promoter[];
@@ -489,15 +489,94 @@ export default function AdvanceManager({ promoters, readOnly }: AdvanceManagerPr
   };
 
   const exportAdvancesToExcel = () => {
-    const pendingOnly = advances.filter(a => a.status === 'pending');
-    if (pendingOnly.length === 0) {
-      alert('Nenhum adiantamento pendente registrado para exportar.');
+    const itemsToExport: BatchPaymentRow[] = [];
+
+    // 1. Se houver promotores selecionados na lista de pendências
+    if (selectedBalances.size > 0) {
+      promoters
+        .filter(p => selectedBalances.has(p.id))
+        .forEach(p => {
+          const net = getPendingBalance(p.id);
+          if (net >= 0.01) {
+            itemsToExport.push({
+              valor: roundCurrency(net),
+              chave: p.pixKey || '',
+              tipo: p.pixKeyType || 'CPF',
+              nome: p.name || '',
+              documento: p.document || '',
+              equipe: p.team === 'rapidao' ? 'Time Rapidão' : 'Time Flash',
+              data: formatDate(new Date()),
+              motivo: 'Adiantamento Semanal / Diárias',
+            });
+          }
+        });
+    } else {
+      // 2. Coleta da lista de pendências em exibição (pendingDisplayList)
+      if (pendingDisplayList.length > 0) {
+        pendingDisplayList.forEach(item => {
+          const prom = item.promoter || promoters.find(p => p.id === item.promoterId);
+          if (prom && item.amount >= 0.01) {
+            itemsToExport.push({
+              valor: roundCurrency(item.amount),
+              chave: prom.pixKey || '',
+              tipo: prom.pixKeyType || 'CPF',
+              nome: prom.name || '',
+              documento: prom.document || '',
+              equipe: prom.team === 'rapidao' ? 'Time Rapidão' : 'Time Flash',
+              data: item.date || formatDate(new Date()),
+              motivo: item.type === 'balance' ? 'Adiantamento Semanal / Diárias' : (item.advance?.notes || 'Adiantamento'),
+            });
+          }
+        });
+      }
+
+      // 3. Fallback abrangente: se pendingDisplayList estiver vazia (ex: por filtro de busca),
+      // varre todos os promotores com saldo pendente e adiantamentos registrados com status pending
+      if (itemsToExport.length === 0) {
+        promoters.forEach(p => {
+          const net = getPendingBalance(p.id);
+          if (net >= 0.01) {
+            itemsToExport.push({
+              valor: roundCurrency(net),
+              chave: p.pixKey || '',
+              tipo: p.pixKeyType || 'CPF',
+              nome: p.name || '',
+              documento: p.document || '',
+              equipe: p.team === 'rapidao' ? 'Time Rapidão' : 'Time Flash',
+              data: formatDate(new Date()),
+              motivo: 'Adiantamento Semanal / Diárias',
+            });
+          }
+        });
+
+        const allRegAdvances = (Object.values(advancesMap).flat() as Advance[]);
+        allRegAdvances
+          .filter(a => a.status === 'pending')
+          .forEach(a => {
+            const prom = promoters.find(p => p.id === a.promoterId);
+            itemsToExport.push({
+              valor: roundCurrency(a.amount),
+              chave: prom?.pixKey || '',
+              tipo: prom?.pixKeyType || 'CPF',
+              nome: a.promoterName || prom?.name || 'Promotor',
+              documento: prom?.document || '',
+              equipe: prom?.team === 'rapidao' ? 'Time Rapidão' : 'Time Flash',
+              data: a.date,
+              motivo: a.notes || 'Adiantamento',
+            });
+          });
+      }
+    }
+
+    if (itemsToExport.length === 0) {
+      alert('Não há adiantamentos ou saldos pendentes no momento para exportar.');
       return;
     }
-    exportPromoterAdvancesToExcel({
-      advances: pendingOnly,
-      promoters,
-      title: 'Adiantamentos Pendentes de Promotores',
+
+    exportBatchPaymentToExcel({
+      rows: itemsToExport,
+      fileName: `Lote_PIX_Adiantamentos_Pendentes_${formatDate(new Date())}.xlsx`,
+      title: 'Lote PIX - Adiantamentos Pendentes de Promotores',
     });
   };
 
@@ -820,9 +899,9 @@ export default function AdvanceManager({ promoters, readOnly }: AdvanceManagerPr
                   <button 
                     onClick={exportAdvancesToExcel} 
                     className="text-xs font-bold text-emerald-700 bg-emerald-50 px-2.5 py-1 rounded-lg border border-emerald-200 hover:bg-emerald-100 flex items-center gap-1 transition-colors"
-                    title="Exportar adiantamentos pendentes para Excel (.xlsx)"
+                    title="Exportar pendentes no formato de lote PIX (Valor, Chave, Tipo, Nome, Documento)"
                   >
-                    <FileSpreadsheet size={12} /> Exportar Pendentes (Excel)
+                    <FileSpreadsheet size={12} /> {selectedBalances.size > 0 ? `Exportar Seleção (${selectedBalances.size})` : `Exportar Pendentes (${pendingDisplayList.length})`}
                   </button>
                 </div>
               </div>
@@ -983,9 +1062,9 @@ export default function AdvanceManager({ promoters, readOnly }: AdvanceManagerPr
               <button 
                 onClick={exportAdvancesToExcel}
                 className="bg-emerald-50 text-emerald-700 px-4 py-2 rounded-xl font-bold text-xs hover:bg-emerald-100 transition-all border border-emerald-200 flex items-center gap-2 shadow-xs"
-                title="Exportar adiantamentos pendentes para Excel (.xlsx)"
+                title="Exportar pendentes no formato de lote PIX (Valor, Chave, Tipo, Nome, Documento)"
               >
-                <FileSpreadsheet size={14} /> Exportar Pendentes (.xlsx)
+                <FileSpreadsheet size={14} /> Exportar Lote PIX (.xlsx)
               </button>
               {promoters.some(p => getPendingBalance(p.id) > 0.01) && (
                 <button 
