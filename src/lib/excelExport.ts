@@ -7,16 +7,60 @@ export function roundCurrency(val: number): number {
   return Math.round((val + Number.EPSILON) * 100) / 100;
 }
 
-// Normaliza o tipo de chave PIX para os padrões aceitos pelos bancos brasileiros
+// Normaliza o tipo de chave PIX para os padrões aceitos pelos bancos (ex: Telefone, Email, CPF, CNPJ, Aleatória)
 export function normalizePixKeyType(type?: string): string {
   if (!type) return 'CPF';
   const t = type.trim().toLowerCase();
-  if (t === 'phone' || t === 'telefone' || t === 'celular') return 'TELEFONE';
-  if (t === 'email' || t === 'e-mail') return 'EMAIL';
-  if (t === 'random' || t === 'aleatoria' || t === 'aleatória' || t === 'evp') return 'ALEATORIA';
+  if (t === 'phone' || t === 'telefone' || t === 'celular') return 'Telefone';
+  if (t === 'email' || t === 'e-mail') return 'Email';
+  if (t === 'random' || t === 'aleatoria' || t === 'aleatória' || t === 'evp') return 'Aleatória';
   if (t === 'cnpj') return 'CNPJ';
   if (t === 'cpf') return 'CPF';
-  return type.trim().toUpperCase();
+  return type.trim();
+}
+
+// Formata chave PIX para lote bancário (ex: telefone 11 dígitos puro sem +55 ou símbolos, e-mail em minúsculas)
+export function formatPixKey(rawKey: string = '', rawType: string = ''): string {
+  const key = String(rawKey || '').trim();
+  const type = normalizePixKeyType(rawType);
+
+  if (type === 'Telefone') {
+    let digits = key.replace(/\D/g, '');
+    // Se vier com o DDI do Brasil 55 e tiver 12 ou 13 dígitos (ex: 5511997793975), remove o 55
+    if (digits.startsWith('55') && (digits.length === 12 || digits.length === 13)) {
+      digits = digits.slice(2);
+    }
+    return digits;
+  }
+
+  if (type === 'CPF') {
+    const digits = key.replace(/\D/g, '');
+    return digits.length === 11 ? digits : key;
+  }
+
+  if (type === 'CNPJ') {
+    const digits = key.replace(/\D/g, '');
+    return digits.length === 14 ? digits : key;
+  }
+
+  if (type === 'Email') {
+    return key.toLowerCase();
+  }
+
+  return key;
+}
+
+// Formata documento (CPF ou CNPJ) com máscara padrão e preservação de zeros à esquerda (ex: 077.246.843-59)
+export function formatDocument(docStr?: string): string {
+  if (!docStr) return '';
+  const digits = String(docStr).replace(/\D/g, '');
+  if (digits.length === 11) {
+    return digits.replace(/(\d{3})(\d{3})(\d{3})(\d{2})/, '$1.$2.$3-$4');
+  }
+  if (digits.length === 14) {
+    return digits.replace(/(\d{2})(\d{3})(\d{3})(\d{4})(\d{2})/, '$1.$2.$3/$4-$5');
+  }
+  return String(docStr).trim();
 }
 
 // Helper to format ISO date (YYYY-MM-DD) to Brazilian date (DD/MM/YYYY)
@@ -249,17 +293,21 @@ export function exportBatchPaymentToExcel({
   const wb = XLSX.utils.book_new();
 
   // ABA 1: Lote PIX (Exatamente como os bancos exigem: 5 colunas diretas na linha 1)
+  // Layout exato solicitado: Valor | Chave | Tipo | Nome | Documento
+  // Exemplo: 2416.67 | 11997793975 | Telefone | Gestor de Carteira Flash | 077.246.843-59
+  //          2800.00 | cadastro.rapidao@teste.com | Email | Cadastro Rapidão | 115.111.554-18
   const batchHeaders = ['Valor', 'Chave', 'Tipo', 'Nome', 'Documento'];
   
-  const batchData: (string | number)[][] = [
+  const batchData: string[][] = [
     batchHeaders,
-    ...rows.map(r => [
-      roundCurrency(r.valor),
-      String(r.chave || '').trim(),
-      normalizePixKeyType(r.tipo),
-      String(r.nome || '').trim(),
-      String(r.documento || '').trim(),
-    ])
+    ...rows.map(r => {
+      const type = normalizePixKeyType(r.tipo);
+      const valStr = Number(r.valor || 0).toFixed(2);
+      const keyStr = formatPixKey(r.chave, type);
+      const nameStr = String(r.nome || '').trim();
+      const docStr = formatDocument(r.documento);
+      return [valStr, keyStr, type, nameStr, docStr];
+    })
   ];
 
   const wsBatch = XLSX.utils.aoa_to_sheet(batchData);
@@ -267,35 +315,36 @@ export function exportBatchPaymentToExcel({
   // Larguras das colunas
   wsBatch['!cols'] = [
     { wch: 14 }, // Valor
-    { wch: 36 }, // Chave
+    { wch: 32 }, // Chave
     { wch: 14 }, // Tipo
     { wch: 36 }, // Nome
     { wch: 20 }, // Documento
   ];
 
-  // Preservar zeros à esquerda de CPF e Chave PIX e formatação monetária de Valor
+  // Garantir que todos os campos mantenham a formatação exata como texto/string
+  // impedindo remoção de zeros à esquerda (ex: 077.246.843-59) ou alteração do decimal (2800.00)
   for (let r = 1; r <= rows.length; r++) {
+    const row = rows[r - 1];
+    const type = normalizePixKeyType(row.tipo);
+    const valStr = Number(row.valor || 0).toFixed(2);
+    const keyStr = formatPixKey(row.chave, type);
+    const nameStr = String(row.nome || '').trim();
+    const docStr = formatDocument(row.documento);
+
     const cellValor = XLSX.utils.encode_cell({ r, c: 0 });
-    if (wsBatch[cellValor]) {
-      wsBatch[cellValor].t = 'n';
-      wsBatch[cellValor].z = '0.00';
-    }
+    wsBatch[cellValor] = { t: 's', v: valStr, w: valStr };
+
     const cellChave = XLSX.utils.encode_cell({ r, c: 1 });
-    if (wsBatch[cellChave]) {
-      wsBatch[cellChave].t = 's';
-    }
+    wsBatch[cellChave] = { t: 's', v: keyStr, w: keyStr };
+
     const cellTipo = XLSX.utils.encode_cell({ r, c: 2 });
-    if (wsBatch[cellTipo]) {
-      wsBatch[cellTipo].t = 's';
-    }
+    wsBatch[cellTipo] = { t: 's', v: type, w: type };
+
     const cellNome = XLSX.utils.encode_cell({ r, c: 3 });
-    if (wsBatch[cellNome]) {
-      wsBatch[cellNome].t = 's';
-    }
+    wsBatch[cellNome] = { t: 's', v: nameStr, w: nameStr };
+
     const cellDoc = XLSX.utils.encode_cell({ r, c: 4 });
-    if (wsBatch[cellDoc]) {
-      wsBatch[cellDoc].t = 's';
-    }
+    wsBatch[cellDoc] = { t: 's', v: docStr, w: docStr };
   }
 
   XLSX.utils.book_append_sheet(wb, wsBatch, 'Lote PIX');
@@ -319,23 +368,26 @@ export function exportBatchPaymentToExcel({
     [`Total de registros: ${rows.length} pendência(s) | Total a pagar: R$ ${roundCurrency(totalAmount).toFixed(2)}`],
     [],
     detailHeaders,
-    ...rows.map(r => [
-      r.nome,
-      r.documento,
-      normalizePixKeyType(r.tipo),
-      r.chave,
-      roundCurrency(r.valor),
-      formatBRDate(r.data),
-      r.equipe || '',
-      r.motivo || 'Adiantamento'
-    ]),
+    ...rows.map(r => {
+      const type = normalizePixKeyType(r.tipo);
+      return [
+        r.nome,
+        formatDocument(r.documento),
+        type,
+        formatPixKey(r.chave, type),
+        Number(r.valor || 0).toFixed(2),
+        formatBRDate(r.data),
+        r.equipe || '',
+        r.motivo || 'Adiantamento'
+      ];
+    }),
     [],
     [
       'TOTAL GERAL A TRANSFERIR',
       '',
       '',
       '',
-      roundCurrency(totalAmount),
+      Number(totalAmount).toFixed(2),
       `${rows.length} pagamento(s)`,
       '',
       ''
@@ -347,6 +399,57 @@ export function exportBatchPaymentToExcel({
   XLSX.utils.book_append_sheet(wb, wsDetail, 'Conferência Detalhada');
 
   XLSX.writeFile(wb, fileName);
+}
+
+/**
+ * EXPORTAÇÃO PADRONIZADA DE LOTE PIX EM FORMATO CSV (PARA BANCOS OU SISTEMAS QUE REQUEREM CSV)
+ * Formato padrão: Valor, Chave, Tipo, Nome, Documento
+ * Suporta delimitador ',' (padrão RFC/bancos) ou ';' (padrão regional Excel Brasil)
+ */
+export function exportBatchPaymentToCSV({
+  rows,
+  fileName,
+  delimiter = ',',
+}: {
+  rows: BatchPaymentRow[];
+  fileName: string;
+  delimiter?: ',' | ';';
+}) {
+  const headers = ['Valor', 'Chave', 'Tipo', 'Nome', 'Documento'];
+
+  const escapeCell = (val: any): string => {
+    if (val === null || val === undefined) return '';
+    const str = String(val).trim();
+    if (str.includes(delimiter) || str.includes('"') || str.includes('\n') || str.includes('\r')) {
+      return `"${str.replace(/"/g, '""')}"`;
+    }
+    return str;
+  };
+
+  const csvLines: string[] = [
+    headers.map(escapeCell).join(delimiter),
+    ...rows.map(r => {
+      const type = normalizePixKeyType(r.tipo);
+      const valStr = Number(r.valor || 0).toFixed(2);
+      const keyStr = formatPixKey(r.chave, type);
+      const nameStr = String(r.nome || '').trim();
+      const docStr = formatDocument(r.documento);
+      return [valStr, keyStr, type, nameStr, docStr].map(escapeCell).join(delimiter);
+    })
+  ];
+
+  // \uFEFF adiciona o BOM UTF-8 para garantir abertura perfeita com acentuação no Excel e em leitores bancários
+  const csvContent = '\uFEFF' + csvLines.join('\r\n');
+  const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement('a');
+  link.setAttribute('href', url);
+  const cleanFileName = fileName.toLowerCase().endsWith('.csv') ? fileName : `${fileName.replace(/\.xlsx$/i, '')}.csv`;
+  link.setAttribute('download', cleanFileName);
+  document.body.appendChild(link);
+  link.click();
+  document.body.removeChild(link);
+  URL.revokeObjectURL(url);
 }
 
 /**
@@ -390,6 +493,44 @@ export function exportEmployeeAdvancesToExcel({
   });
 }
 
+export function exportEmployeeAdvancesToCSV({
+  advances,
+  employees,
+  teams,
+  delimiter = ',',
+}: {
+  advances: EmployeeAdvance[];
+  employees: Employee[];
+  teams: Team[];
+  delimiter?: ',' | ';';
+}) {
+  const pendingAdvances = advances
+    .filter(a => a.status === 'pending')
+    .sort((a, b) => b.date.localeCompare(a.date));
+
+  const rows: BatchPaymentRow[] = pendingAdvances.map(adv => {
+    const emp = employees.find(e => e.id === adv.employeeId);
+    const teamDisplay = getTeamDisplay(emp?.team, teams);
+    return {
+      valor: Number(adv.amount || 0),
+      chave: emp?.pixKey || '',
+      tipo: emp?.pixKeyType || 'CPF',
+      nome: emp ? emp.name : 'Funcionário',
+      documento: emp?.document || '',
+      equipe: teamDisplay.name,
+      data: adv.date,
+      motivo: adv.notes || 'Adiantamento'
+    };
+  });
+
+  const fileName = `Lote_PIX_Pendentes_Funcionarios_${new Date().toISOString().split('T')[0]}.csv`;
+  exportBatchPaymentToCSV({
+    rows,
+    fileName,
+    delimiter,
+  });
+}
+
 /**
  * EXPORT PROMOTER ADVANCES (ADIANTAMENTOS DE PROMOTORES - APENAS PENDENTES)
  */
@@ -427,6 +568,43 @@ export function exportPromoterAdvancesToExcel({
     rows,
     fileName,
     title,
+  });
+}
+
+export function exportPromoterAdvancesToCSV({
+  advances,
+  promoters,
+  delimiter = ',',
+}: {
+  advances: Advance[];
+  promoters: Promoter[];
+  delimiter?: ',' | ';';
+}) {
+  const pendingAdvances = advances
+    .filter(a => a.status === 'pending')
+    .sort((a, b) => b.date.localeCompare(a.date));
+
+  const rows: BatchPaymentRow[] = pendingAdvances.map(adv => {
+    const prom = promoters.find(p => p.id === adv.promoterId);
+    const promName = adv.promoterName || prom?.name || 'Promotor';
+    const teamName = prom?.team === 'rapidao' ? 'Time Rapidão' : 'Time Flash';
+    return {
+      valor: Number(adv.amount || 0),
+      chave: prom?.pixKey || '',
+      tipo: prom?.pixKeyType || 'CPF',
+      nome: promName,
+      documento: prom?.document || '',
+      equipe: teamName,
+      data: adv.date,
+      motivo: adv.notes || 'Adiantamento'
+    };
+  });
+
+  const fileName = `Lote_PIX_Pendentes_Promotores_${new Date().toISOString().split('T')[0]}.csv`;
+  exportBatchPaymentToCSV({
+    rows,
+    fileName,
+    delimiter,
   });
 }
 

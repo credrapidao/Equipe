@@ -4,13 +4,13 @@
  */
 
 import React, { useState, useEffect } from 'react';
-import { Wallet, Plus, Trash2, CheckCircle2, Clock, DollarSign, Copy, Check, PlusCircle, XCircle, Search, FileSpreadsheet } from 'lucide-react';
+import { Wallet, Plus, Trash2, CheckCircle2, Clock, DollarSign, Copy, Check, PlusCircle, XCircle, Search, FileSpreadsheet, FileText, ChevronDown } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { db } from '../lib/firebase';
 import { collection, query, onSnapshot, addDoc, updateDoc, doc, deleteDoc, serverTimestamp, orderBy, where, limit, getDocs, writeBatch } from 'firebase/firestore';
 import { Promoter, Advance, OperationType } from '../types';
 import { handleFirestoreError, formatCurrency, formatDate } from '../lib/utils';
-import { exportPromoterAdvancesToExcel, exportBatchPaymentToExcel, BatchPaymentRow, roundCurrency } from '../lib/excelExport';
+import { exportPromoterAdvancesToExcel, exportPromoterAdvancesToCSV, exportBatchPaymentToExcel, exportBatchPaymentToCSV, BatchPaymentRow, roundCurrency } from '../lib/excelExport';
 
 interface AdvanceManagerProps {
   promoters: Promoter[];
@@ -34,6 +34,8 @@ export default function AdvanceManager({ promoters, readOnly }: AdvanceManagerPr
   const [selectedAdvances, setSelectedAdvances] = useState<Set<string>>(new Set());
   const [activeTab, setActiveTab] = useState<'registration' | 'history'>('registration');
   const [searchTerm, setSearchTerm] = useState('');
+  const [showExportMenu, setShowExportMenu] = useState(false);
+  const [showHistoryExportMenu, setShowHistoryExportMenu] = useState(false);
 
   // 1. DATA FLATTENING
   const advances: Advance[] = React.useMemo(() => {
@@ -488,10 +490,31 @@ export default function AdvanceManager({ promoters, readOnly }: AdvanceManagerPr
     }
   };
 
-  const exportAdvancesToExcel = () => {
+  const getItemsToExport = (): BatchPaymentRow[] => {
     const itemsToExport: BatchPaymentRow[] = [];
 
-    // 1. Se houver promotores selecionados na lista de pendências
+    // 1. Se estiver na aba de histórico e houver adiantamentos selecionados
+    if (activeTab === 'history' && selectedAdvances.size > 0) {
+      const allRegAdvances = (Object.values(advancesMap).flat() as Advance[]);
+      allRegAdvances
+        .filter(a => selectedAdvances.has(a.id))
+        .forEach(a => {
+          const prom = promoters.find(p => p.id === a.promoterId);
+          itemsToExport.push({
+            valor: roundCurrency(a.amount),
+            chave: prom?.pixKey || '',
+            tipo: prom?.pixKeyType || 'CPF',
+            nome: a.promoterName || prom?.name || 'Promotor',
+            documento: prom?.document || '',
+            equipe: prom?.team === 'rapidao' ? 'Time Rapidão' : 'Time Flash',
+            data: a.date,
+            motivo: a.notes || 'Adiantamento',
+          });
+        });
+      return itemsToExport;
+    }
+
+    // 2. Se houver promotores selecionados na lista de pendências
     if (selectedBalances.size > 0) {
       promoters
         .filter(p => selectedBalances.has(p.id))
@@ -510,74 +533,90 @@ export default function AdvanceManager({ promoters, readOnly }: AdvanceManagerPr
             });
           }
         });
-    } else {
-      // 2. Coleta da lista de pendências em exibição (pendingDisplayList)
-      if (pendingDisplayList.length > 0) {
-        pendingDisplayList.forEach(item => {
-          const prom = item.promoter || promoters.find(p => p.id === item.promoterId);
-          if (prom && item.amount >= 0.01) {
-            itemsToExport.push({
-              valor: roundCurrency(item.amount),
-              chave: prom.pixKey || '',
-              tipo: prom.pixKeyType || 'CPF',
-              nome: prom.name || '',
-              documento: prom.document || '',
-              equipe: prom.team === 'rapidao' ? 'Time Rapidão' : 'Time Flash',
-              data: item.date || formatDate(new Date()),
-              motivo: item.type === 'balance' ? 'Adiantamento Semanal / Diárias' : (item.advance?.notes || 'Adiantamento'),
-            });
-          }
-        });
-      }
-
-      // 3. Fallback abrangente: se pendingDisplayList estiver vazia (ex: por filtro de busca),
-      // varre todos os promotores com saldo pendente e adiantamentos registrados com status pending
-      if (itemsToExport.length === 0) {
-        promoters.forEach(p => {
-          const net = getPendingBalance(p.id);
-          if (net >= 0.01) {
-            itemsToExport.push({
-              valor: roundCurrency(net),
-              chave: p.pixKey || '',
-              tipo: p.pixKeyType || 'CPF',
-              nome: p.name || '',
-              documento: p.document || '',
-              equipe: p.team === 'rapidao' ? 'Time Rapidão' : 'Time Flash',
-              data: formatDate(new Date()),
-              motivo: 'Adiantamento Semanal / Diárias',
-            });
-          }
-        });
-
-        const allRegAdvances = (Object.values(advancesMap).flat() as Advance[]);
-        allRegAdvances
-          .filter(a => a.status === 'pending')
-          .forEach(a => {
-            const prom = promoters.find(p => p.id === a.promoterId);
-            itemsToExport.push({
-              valor: roundCurrency(a.amount),
-              chave: prom?.pixKey || '',
-              tipo: prom?.pixKeyType || 'CPF',
-              nome: a.promoterName || prom?.name || 'Promotor',
-              documento: prom?.document || '',
-              equipe: prom?.team === 'rapidao' ? 'Time Rapidão' : 'Time Flash',
-              data: a.date,
-              motivo: a.notes || 'Adiantamento',
-            });
-          });
-      }
+      return itemsToExport;
     }
+
+    // 3. Coleta da lista de pendências em exibição (pendingDisplayList)
+    if (pendingDisplayList.length > 0) {
+      pendingDisplayList.forEach(item => {
+        const prom = item.promoter || promoters.find(p => p.id === item.promoterId);
+        if (prom && item.amount >= 0.01) {
+          itemsToExport.push({
+            valor: roundCurrency(item.amount),
+            chave: prom.pixKey || '',
+            tipo: prom.pixKeyType || 'CPF',
+            nome: prom.name || '',
+            documento: prom.document || '',
+            equipe: prom.team === 'rapidao' ? 'Time Rapidão' : 'Time Flash',
+            data: item.date || formatDate(new Date()),
+            motivo: item.type === 'balance' ? 'Adiantamento Semanal / Diárias' : (item.advance?.notes || 'Adiantamento'),
+          });
+        }
+      });
+    }
+
+    // 4. Fallback abrangente: se pendingDisplayList estiver vazia (ex: por filtro de busca),
+    // varre todos os promotores com saldo pendente e adiantamentos registrados com status pending
+    if (itemsToExport.length === 0) {
+      promoters.forEach(p => {
+        const net = getPendingBalance(p.id);
+        if (net >= 0.01) {
+          itemsToExport.push({
+            valor: roundCurrency(net),
+            chave: p.pixKey || '',
+            tipo: p.pixKeyType || 'CPF',
+            nome: p.name || '',
+            documento: p.document || '',
+            equipe: p.team === 'rapidao' ? 'Time Rapidão' : 'Time Flash',
+            data: formatDate(new Date()),
+            motivo: 'Adiantamento Semanal / Diárias',
+          });
+        }
+      });
+
+      const allRegAdvances = (Object.values(advancesMap).flat() as Advance[]);
+      allRegAdvances
+        .filter(a => a.status === 'pending')
+        .forEach(a => {
+          const prom = promoters.find(p => p.id === a.promoterId);
+          itemsToExport.push({
+            valor: roundCurrency(a.amount),
+            chave: prom?.pixKey || '',
+            tipo: prom?.pixKeyType || 'CPF',
+            nome: a.promoterName || prom?.name || 'Promotor',
+            documento: prom?.document || '',
+            equipe: prom?.team === 'rapidao' ? 'Time Rapidão' : 'Time Flash',
+            data: a.date,
+            motivo: a.notes || 'Adiantamento',
+          });
+        });
+    }
+
+    return itemsToExport;
+  };
+
+  const handleExportAdvances = (format: 'xlsx' | 'csv', delimiter: ',' | ';' = ',') => {
+    const itemsToExport = getItemsToExport();
 
     if (itemsToExport.length === 0) {
       alert('Não há adiantamentos ou saldos pendentes no momento para exportar.');
       return;
     }
 
-    exportBatchPaymentToExcel({
-      rows: itemsToExport,
-      fileName: `Lote_PIX_Adiantamentos_Pendentes_${formatDate(new Date())}.xlsx`,
-      title: 'Lote PIX - Adiantamentos Pendentes de Promotores',
-    });
+    const todayStr = formatDate(new Date());
+    if (format === 'csv') {
+      exportBatchPaymentToCSV({
+        rows: itemsToExport,
+        fileName: `Lote_PIX_Adiantamentos_Pendentes_${todayStr}.csv`,
+        delimiter,
+      });
+    } else {
+      exportBatchPaymentToExcel({
+        rows: itemsToExport,
+        fileName: `Lote_PIX_Adiantamentos_Pendentes_${todayStr}.xlsx`,
+        title: 'Lote PIX - Adiantamentos Pendentes de Promotores',
+      });
+    }
   };
 
   const registerAllWeeklyAdvances = async () => {
@@ -896,13 +935,68 @@ export default function AdvanceManager({ promoters, readOnly }: AdvanceManagerPr
                       <Copy size={12} /> Copiar Seleção ({selectedBalances.size})
                     </button>
                   )}
-                  <button 
-                    onClick={exportAdvancesToExcel} 
-                    className="text-xs font-bold text-emerald-700 bg-emerald-50 px-2.5 py-1 rounded-lg border border-emerald-200 hover:bg-emerald-100 flex items-center gap-1 transition-colors"
-                    title="Exportar pendentes no formato de lote PIX (Valor, Chave, Tipo, Nome, Documento)"
-                  >
-                    <FileSpreadsheet size={12} /> {selectedBalances.size > 0 ? `Exportar Seleção (${selectedBalances.size})` : `Exportar Pendentes (${pendingDisplayList.length})`}
-                  </button>
+                  <div className="relative inline-block">
+                    <div className="flex items-center rounded-lg border border-emerald-200 bg-emerald-50 overflow-hidden shadow-2xs">
+                      <button 
+                        onClick={() => handleExportAdvances('xlsx')} 
+                        className="text-xs font-bold text-emerald-700 px-2.5 py-1 hover:bg-emerald-100 flex items-center gap-1 transition-colors border-r border-emerald-200"
+                        title="Exportar pendentes em Excel (.xlsx)"
+                      >
+                        <FileSpreadsheet size={12} /> Excel (.xlsx)
+                      </button>
+                      <button 
+                        onClick={() => handleExportAdvances('csv', ',')} 
+                        className="text-xs font-bold text-emerald-700 px-2.5 py-1 hover:bg-emerald-100 flex items-center gap-1 transition-colors"
+                        title="Exportar pendentes em CSV (.csv) para lote de pagamentos"
+                      >
+                        <FileText size={12} /> CSV (.csv)
+                      </button>
+                      <button 
+                        onClick={() => setShowExportMenu(prev => !prev)}
+                        className="text-xs font-bold text-emerald-700 px-1.5 py-1 hover:bg-emerald-100 flex items-center border-l border-emerald-200 transition-colors"
+                        title="Opções de delimitador e formato"
+                      >
+                        <ChevronDown size={12} />
+                      </button>
+                    </div>
+                    {showExportMenu && (
+                      <div className="absolute right-0 mt-1 w-64 bg-white rounded-xl shadow-xl border border-zinc-200 py-1.5 z-50 text-left">
+                        <div className="px-3 py-1 text-[10px] font-bold text-zinc-400 uppercase tracking-wider">
+                          Formato de Exportação ({selectedBalances.size > 0 ? `${selectedBalances.size} selecionados` : `${pendingDisplayList.length} pendentes`})
+                        </div>
+                        <button
+                          onClick={() => { handleExportAdvances('xlsx'); setShowExportMenu(false); }}
+                          className="w-full px-3 py-2 text-xs font-bold text-zinc-700 hover:bg-zinc-50 flex items-center gap-2"
+                        >
+                          <FileSpreadsheet size={14} className="text-emerald-600 shrink-0" />
+                          <div className="flex flex-col text-left">
+                            <span>Planilha Excel (.xlsx)</span>
+                            <span className="text-[10px] text-zinc-400 font-normal">2 abas: Lote bancário + Conferência</span>
+                          </div>
+                        </button>
+                        <button
+                          onClick={() => { handleExportAdvances('csv', ','); setShowExportMenu(false); }}
+                          className="w-full px-3 py-2 text-xs font-bold text-zinc-700 hover:bg-zinc-50 flex items-center gap-2 border-t border-zinc-100"
+                        >
+                          <FileText size={14} className="text-blue-600 shrink-0" />
+                          <div className="flex flex-col text-left">
+                            <span>Arquivo CSV (.csv - Vírgula)</span>
+                            <span className="text-[10px] text-zinc-400 font-normal">Padrão RFC / Cora / Inter / Stone</span>
+                          </div>
+                        </button>
+                        <button
+                          onClick={() => { handleExportAdvances('csv', ';'); setShowExportMenu(false); }}
+                          className="w-full px-3 py-2 text-xs font-bold text-zinc-700 hover:bg-zinc-50 flex items-center gap-2"
+                        >
+                          <FileText size={14} className="text-amber-600 shrink-0" />
+                          <div className="flex flex-col text-left">
+                            <span>Arquivo CSV (.csv - Ponto e Vírgula)</span>
+                            <span className="text-[10px] text-zinc-400 font-normal">Padrão Excel Brasil / Itaú</span>
+                          </div>
+                        </button>
+                      </div>
+                    )}
+                  </div>
                 </div>
               </div>
             </div>
@@ -1059,13 +1153,68 @@ export default function AdvanceManager({ promoters, readOnly }: AdvanceManagerPr
               >
                 <Copy size={14} /> Relatório de Pagos
               </button>
-              <button 
-                onClick={exportAdvancesToExcel}
-                className="bg-emerald-50 text-emerald-700 px-4 py-2 rounded-xl font-bold text-xs hover:bg-emerald-100 transition-all border border-emerald-200 flex items-center gap-2 shadow-xs"
-                title="Exportar pendentes no formato de lote PIX (Valor, Chave, Tipo, Nome, Documento)"
-              >
-                <FileSpreadsheet size={14} /> Exportar Lote PIX (.xlsx)
-              </button>
+              <div className="relative inline-block">
+                <div className="flex items-center rounded-xl border border-emerald-200 bg-emerald-50 overflow-hidden shadow-2xs">
+                  <button 
+                    onClick={() => handleExportAdvances('xlsx')}
+                    className="text-emerald-700 px-3 py-2 font-bold text-xs hover:bg-emerald-100 transition-all flex items-center gap-1.5 border-r border-emerald-200"
+                    title="Exportar lote PIX em Excel (.xlsx)"
+                  >
+                    <FileSpreadsheet size={14} /> Lote Excel (.xlsx)
+                  </button>
+                  <button 
+                    onClick={() => handleExportAdvances('csv', ',')}
+                    className="text-emerald-700 px-3 py-2 font-bold text-xs hover:bg-emerald-100 transition-all flex items-center gap-1.5"
+                    title="Exportar lote PIX em CSV (.csv)"
+                  >
+                    <FileText size={14} /> Lote CSV (.csv)
+                  </button>
+                  <button 
+                    onClick={() => setShowHistoryExportMenu(prev => !prev)}
+                    className="text-emerald-700 px-2 py-2 hover:bg-emerald-100 transition-all flex items-center border-l border-emerald-200"
+                    title="Mais opções de formato"
+                  >
+                    <ChevronDown size={12} />
+                  </button>
+                </div>
+                {showHistoryExportMenu && (
+                  <div className="absolute right-0 mt-1 w-64 bg-white rounded-xl shadow-xl border border-zinc-200 py-1.5 z-50 text-left">
+                    <div className="px-3 py-1 text-[10px] font-bold text-zinc-400 uppercase tracking-wider">
+                      Exportar {selectedAdvances.size > 0 ? `${selectedAdvances.size} selecionados` : 'Adiantamentos'}
+                    </div>
+                    <button
+                      onClick={() => { handleExportAdvances('xlsx'); setShowHistoryExportMenu(false); }}
+                      className="w-full px-3 py-2 text-xs font-bold text-zinc-700 hover:bg-zinc-50 flex items-center gap-2"
+                    >
+                      <FileSpreadsheet size={14} className="text-emerald-600 shrink-0" />
+                      <div className="flex flex-col text-left">
+                        <span>Planilha Excel (.xlsx)</span>
+                        <span className="text-[10px] text-zinc-400 font-normal">Formato bancário + Conferência</span>
+                      </div>
+                    </button>
+                    <button
+                      onClick={() => { handleExportAdvances('csv', ','); setShowHistoryExportMenu(false); }}
+                      className="w-full px-3 py-2 text-xs font-bold text-zinc-700 hover:bg-zinc-50 flex items-center gap-2 border-t border-zinc-100"
+                    >
+                      <FileText size={14} className="text-blue-600 shrink-0" />
+                      <div className="flex flex-col text-left">
+                        <span>Arquivo CSV (.csv - Vírgula)</span>
+                        <span className="text-[10px] text-zinc-400 font-normal">Padrão RFC / Cora / Inter / Stone</span>
+                      </div>
+                    </button>
+                    <button
+                      onClick={() => { handleExportAdvances('csv', ';'); setShowHistoryExportMenu(false); }}
+                      className="w-full px-3 py-2 text-xs font-bold text-zinc-700 hover:bg-zinc-50 flex items-center gap-2"
+                    >
+                      <FileText size={14} className="text-amber-600 shrink-0" />
+                      <div className="flex flex-col text-left">
+                        <span>Arquivo CSV (.csv - Ponto e Vírgula)</span>
+                        <span className="text-[10px] text-zinc-400 font-normal">Padrão Excel Brasil / Itaú</span>
+                      </div>
+                    </button>
+                  </div>
+                )}
+              </div>
               {promoters.some(p => getPendingBalance(p.id) > 0.01) && (
                 <button 
                   onClick={registerAllWeeklyAdvances}

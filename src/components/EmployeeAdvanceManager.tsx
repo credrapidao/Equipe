@@ -1,10 +1,10 @@
 import React, { useState, useEffect, useMemo } from 'react';
-import { Calendar, User, Trash2, Plus, AlertCircle, Coins, Search, Wallet, Copy, Check, FileSpreadsheet } from 'lucide-react';
+import { Calendar, User, Trash2, Plus, AlertCircle, Coins, Search, Wallet, Copy, Check, FileSpreadsheet, FileText, ChevronDown } from 'lucide-react';
 import { db } from '../lib/firebase';
 import { collection, addDoc, deleteDoc, doc, updateDoc } from 'firebase/firestore';
 import { Employee, EmployeeAdvance, OperationType, Team } from '../types';
 import { handleFirestoreError } from '../lib/utils';
-import { exportEmployeeAdvancesToExcel } from '../lib/excelExport';
+import { exportEmployeeAdvancesToExcel, exportEmployeeAdvancesToCSV } from '../lib/excelExport';
 
 interface EmployeeAdvanceManagerProps {
   employees: Employee[];
@@ -25,6 +25,7 @@ export function EmployeeAdvanceManager({ employees, allAdvances, readOnly, teams
   const [searchQuery, setSearchQuery] = useState('');
   const [copiedId, setCopiedId] = useState<string | null>(null);
   const [copiedPending, setCopiedPending] = useState(false);
+  const [showExportMenu, setShowExportMenu] = useState(false);
 
   const activeEmployees = useMemo(() => {
     return employees.filter(e => e.active);
@@ -152,7 +153,7 @@ export function EmployeeAdvanceManager({ employees, allAdvances, readOnly, teams
     return (searchQuery.trim() ? filteredAdvances : allAdvances).filter(a => a.status === 'pending').length;
   }, [filteredAdvances, allAdvances, searchQuery]);
 
-  const handleExportExcel = () => {
+  const handleExport = (format: 'xlsx' | 'csv', delimiter: ',' | ';' = ',') => {
     let pendingOnly = (searchQuery.trim() ? filteredAdvances : allAdvances).filter(a => a.status === 'pending');
     if (pendingOnly.length === 0) {
       pendingOnly = allAdvances.filter(a => a.status === 'pending');
@@ -161,12 +162,21 @@ export function EmployeeAdvanceManager({ employees, allAdvances, readOnly, teams
       alert('Nenhum adiantamento pendente para exportar.');
       return;
     }
-    exportEmployeeAdvancesToExcel({
-      advances: pendingOnly,
-      employees,
-      teams,
-      title: 'Adiantamentos Pendentes de Funcionários',
-    });
+    if (format === 'csv') {
+      exportEmployeeAdvancesToCSV({
+        advances: pendingOnly,
+        employees,
+        teams,
+        delimiter,
+      });
+    } else {
+      exportEmployeeAdvancesToExcel({
+        advances: pendingOnly,
+        employees,
+        teams,
+        title: 'Adiantamentos Pendentes de Funcionários',
+      });
+    }
   };
 
   return (
@@ -328,15 +338,73 @@ export function EmployeeAdvanceManager({ employees, allAdvances, readOnly, teams
               <span>{copiedPending ? 'Copiado!' : 'Copiar Pendentes'}</span>
             </button>
 
-            <button
-              onClick={handleExportExcel}
-              disabled={pendingAdvancesCount === 0}
-              className="flex items-center gap-1.5 px-3 py-2 rounded-xl text-xs font-bold transition-all border bg-emerald-50 text-emerald-700 border-emerald-200 hover:bg-emerald-100 disabled:opacity-50 shrink-0 shadow-xs"
-              title="Exportar apenas adiantamentos pendentes para Excel (.xlsx)"
-            >
-              <FileSpreadsheet size={14} />
-              <span>Exportar Pendentes ({pendingAdvancesCount})</span>
-            </button>
+            <div className="relative inline-block shrink-0">
+              <div className="flex items-center rounded-xl border border-emerald-200 bg-emerald-50 overflow-hidden shadow-2xs">
+                <button
+                  onClick={() => handleExport('xlsx')}
+                  disabled={pendingAdvancesCount === 0}
+                  className="flex items-center gap-1.5 px-3 py-2 text-xs font-bold text-emerald-700 hover:bg-emerald-100 disabled:opacity-50 transition-colors border-r border-emerald-200"
+                  title="Exportar adiantamentos pendentes em Excel (.xlsx)"
+                >
+                  <FileSpreadsheet size={14} />
+                  <span>Excel ({pendingAdvancesCount})</span>
+                </button>
+                <button
+                  onClick={() => handleExport('csv', ',')}
+                  disabled={pendingAdvancesCount === 0}
+                  className="flex items-center gap-1.5 px-3 py-2 text-xs font-bold text-emerald-700 hover:bg-emerald-100 disabled:opacity-50 transition-colors"
+                  title="Exportar adiantamentos pendentes em CSV (.csv)"
+                >
+                  <FileText size={14} />
+                  <span>CSV (.csv)</span>
+                </button>
+                <button
+                  onClick={() => setShowExportMenu(prev => !prev)}
+                  disabled={pendingAdvancesCount === 0}
+                  className="px-2 py-2 text-xs font-bold text-emerald-700 hover:bg-emerald-100 disabled:opacity-50 transition-colors border-l border-emerald-200"
+                  title="Mais opções de formato"
+                >
+                  <ChevronDown size={12} />
+                </button>
+              </div>
+              {showExportMenu && (
+                <div className="absolute right-0 mt-1 w-64 bg-white rounded-xl shadow-xl border border-zinc-200 py-1.5 z-50 text-left">
+                  <div className="px-3 py-1 text-[10px] font-bold text-zinc-400 uppercase tracking-wider">
+                    Exportar Adiantamentos ({pendingAdvancesCount} pendentes)
+                  </div>
+                  <button
+                    onClick={() => { handleExport('xlsx'); setShowExportMenu(false); }}
+                    className="w-full px-3 py-2 text-xs font-bold text-zinc-700 hover:bg-zinc-50 flex items-center gap-2"
+                  >
+                    <FileSpreadsheet size={14} className="text-emerald-600 shrink-0" />
+                    <div className="flex flex-col text-left">
+                      <span>Planilha Excel (.xlsx)</span>
+                      <span className="text-[10px] text-zinc-400 font-normal">2 abas: Lote bancário + Conferência</span>
+                    </div>
+                  </button>
+                  <button
+                    onClick={() => { handleExport('csv', ','); setShowExportMenu(false); }}
+                    className="w-full px-3 py-2 text-xs font-bold text-zinc-700 hover:bg-zinc-50 flex items-center gap-2 border-t border-zinc-100"
+                  >
+                    <FileText size={14} className="text-blue-600 shrink-0" />
+                    <div className="flex flex-col text-left">
+                      <span>Arquivo CSV (.csv - Vírgula)</span>
+                      <span className="text-[10px] text-zinc-400 font-normal">Padrão RFC / Cora / Inter / Stone</span>
+                    </div>
+                  </button>
+                  <button
+                    onClick={() => { handleExport('csv', ';'); setShowExportMenu(false); }}
+                    className="w-full px-3 py-2 text-xs font-bold text-zinc-700 hover:bg-zinc-50 flex items-center gap-2"
+                  >
+                    <FileText size={14} className="text-amber-600 shrink-0" />
+                    <div className="flex flex-col text-left">
+                      <span>Arquivo CSV (.csv - Ponto e Vírgula)</span>
+                      <span className="text-[10px] text-zinc-400 font-normal">Padrão Excel Brasil / Itaú</span>
+                    </div>
+                  </button>
+                </div>
+              )}
+            </div>
 
             <div className="relative w-full sm:w-64">
               <input
