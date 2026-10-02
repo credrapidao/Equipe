@@ -272,18 +272,22 @@ export function EmployeeReport({
     return type;
   };
 
-  // Format payment data for copying: only Nome, CPF, Tipo de chave e Chave Pix
-  const getPaymentText = (item: typeof employeeSalaries[0]) => {
+  // Format payment data for copying: Nome, CPF, Tipo de chave, Chave Pix e Valor a Receber
+  const getPaymentText = (item: typeof employeeSalaries[0], teamId?: string) => {
+    const isSplit = item.employee.team === 'both' && (teamId === 'flash' || teamId === 'rapidao');
+    const netToPay = isSplit ? item.netSalary / 2 : item.netSalary;
+
     return [
       `Nome: ${item.employee.name}`,
       `CPF: ${item.employee.document || 'Não informado'}`,
       `Tipo de Chave: ${formatPixKeyType(item.employee.pixKeyType)}`,
-      `Chave Pix: ${item.employee.pixKey || 'Não informada'}`
+      `Chave Pix: ${item.employee.pixKey || 'Não informada'}`,
+      `Valor a Receber: ${formatCurrency(netToPay)}`
     ].join('\n');
   };
 
   const handleCopySingle = (item: typeof employeeSalaries[0], teamId?: string) => {
-    const text = getPaymentText(item);
+    const text = getPaymentText(item, teamId);
     navigator.clipboard.writeText(text).then(() => {
       setCopiedId(`${item.employee.id}_${teamId || 'all'}`);
       setTimeout(() => setCopiedId(null), 2000);
@@ -318,7 +322,7 @@ export function EmployeeReport({
     const teamTotalNet = entry.totals.totalNetSalary;
 
     const textHeader = `FECHAMENTO - ${teamTitle} (${monthLabel}/${selectedYear})\n--------------------\n`;
-    const textBody = activeSalaries.map(item => getPaymentText(item)).join('\n\n');
+    const textBody = activeSalaries.map(item => getPaymentText(item, teamId)).join('\n\n');
     const textFooter = `\n--------------------\nTOTAL DA EQUIPE: ${formatCurrency(teamTotalNet)}`;
 
     navigator.clipboard.writeText(textHeader + textBody + textFooter).then(() => {
@@ -790,7 +794,7 @@ export function EmployeeReport({
                                   ? 'bg-emerald-50 text-emerald-700 border-emerald-200'
                                   : 'bg-white text-zinc-700 border-zinc-200 hover:bg-zinc-50 active:scale-95 disabled:opacity-40'
                               }`}
-                              title="Copiar Nome, CPF, Tipo de Chave e Chave Pix"
+                              title="Copiar Nome, CPF, Tipo de Chave, Chave Pix e Valor a Receber"
                             >
                               {copiedId === `${item.employee.id}_${team.id}` ? (
                                 <>
