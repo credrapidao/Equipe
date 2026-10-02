@@ -117,7 +117,66 @@ export function exportEmployeeClosingToExcel({
 }) {
   const wb = XLSX.utils.book_new();
 
-  // 1. SHEET: Fechamento Detalhado
+  // 1. ABA 1: Lote PIX (Exatamente no formato bancário: Valor | Chave | Tipo | Nome | Documento)
+  // Formato do valor: 2200.00
+  const activePayableItems = items.filter(
+    item => item.employee.active && (item.displayNetSalary !== undefined ? item.displayNetSalary : item.netSalary) > 0
+  );
+
+  const batchHeaders = ['Valor', 'Chave', 'Tipo', 'Nome', 'Documento'];
+  const batchData: string[][] = [
+    batchHeaders,
+    ...activePayableItems.map(item => {
+      const emp = item.employee;
+      const netSal = item.displayNetSalary !== undefined ? item.displayNetSalary : item.netSalary;
+      const type = normalizePixKeyType(emp.pixKeyType);
+      const valStr = Number(netSal || 0).toFixed(2);
+      const keyStr = formatPixKey(emp.pixKey, type);
+      const nameStr = String(emp.name || '').trim();
+      const docStr = formatDocument(emp.document);
+      return [valStr, keyStr, type, nameStr, docStr];
+    })
+  ];
+
+  const wsBatch = XLSX.utils.aoa_to_sheet(batchData);
+  wsBatch['!cols'] = [
+    { wch: 14 }, // Valor
+    { wch: 32 }, // Chave
+    { wch: 14 }, // Tipo
+    { wch: 36 }, // Nome
+    { wch: 20 }, // Documento
+  ];
+
+  // Forçar células como string para manter formato 2200.00 e zeros à esquerda
+  for (let r = 1; r <= activePayableItems.length; r++) {
+    const item = activePayableItems[r - 1];
+    const emp = item.employee;
+    const netSal = item.displayNetSalary !== undefined ? item.displayNetSalary : item.netSalary;
+    const type = normalizePixKeyType(emp.pixKeyType);
+    const valStr = Number(netSal || 0).toFixed(2);
+    const keyStr = formatPixKey(emp.pixKey, type);
+    const nameStr = String(emp.name || '').trim();
+    const docStr = formatDocument(emp.document);
+
+    const cellValor = XLSX.utils.encode_cell({ r, c: 0 });
+    wsBatch[cellValor] = { t: 's', v: valStr, w: valStr };
+
+    const cellChave = XLSX.utils.encode_cell({ r, c: 1 });
+    wsBatch[cellChave] = { t: 's', v: keyStr, w: keyStr };
+
+    const cellTipo = XLSX.utils.encode_cell({ r, c: 2 });
+    wsBatch[cellTipo] = { t: 's', v: type, w: type };
+
+    const cellNome = XLSX.utils.encode_cell({ r, c: 3 });
+    wsBatch[cellNome] = { t: 's', v: nameStr, w: nameStr };
+
+    const cellDoc = XLSX.utils.encode_cell({ r, c: 4 });
+    wsBatch[cellDoc] = { t: 's', v: docStr, w: docStr };
+  }
+
+  XLSX.utils.book_append_sheet(wb, wsBatch, 'Lote PIX');
+
+  // 2. ABA 2: Fechamento Detalhado (Para auditoria interna)
   const detailedHeaders = [
     'Nome do Funcionário',
     'Equipe',
@@ -173,14 +232,14 @@ export function exportEmployeeClosingToExcel({
       teamDisplay.name,
       emp.role || '',
       emp.level || '',
-      emp.document || '',
-      emp.pixKeyType || 'PIX',
-      emp.pixKey || '',
-      roundCurrency(emp.baseSalary),
-      roundCurrency(propSal),
-      roundCurrency(absDisc),
-      roundCurrency(advTot),
-      roundCurrency(netSal),
+      formatDocument(emp.document),
+      normalizePixKeyType(emp.pixKeyType),
+      formatPixKey(emp.pixKey, emp.pixKeyType),
+      Number(emp.baseSalary || 0).toFixed(2),
+      Number(propSal || 0).toFixed(2),
+      Number(absDisc || 0).toFixed(2),
+      Number(advTot || 0).toFixed(2),
+      Number(netSal || 0).toFixed(2),
       emp.active ? 'Ativo' : 'Inativo',
       obs
     ]);
@@ -196,73 +255,65 @@ export function exportEmployeeClosingToExcel({
     '',
     '',
     '',
-    roundCurrency(sumBase),
-    roundCurrency(sumProp),
-    roundCurrency(sumFaltas),
-    roundCurrency(sumAdiant),
-    roundCurrency(sumNet),
+    Number(sumBase).toFixed(2),
+    Number(sumProp).toFixed(2),
+    Number(sumFaltas).toFixed(2),
+    Number(sumAdiant).toFixed(2),
+    Number(sumNet).toFixed(2),
     '',
     ''
   ]);
 
   const wsDetailed = XLSX.utils.aoa_to_sheet(detailedRows);
   wsDetailed['!cols'] = getColumnWidths(detailedRows.slice(3));
-  XLSX.utils.book_append_sheet(wb, wsDetailed, 'Fechamento de Salários');
-
-  // 2. SHEET: Lote Pagamentos PIX (Pronto para copiar ou importar no Internet Banking)
-  const pixHeaders = [
-    'Favorecido (Nome)',
-    'CPF',
-    'Tipo Chave PIX',
-    'Chave PIX',
-    'Valor a Pagar (R$)',
-    'Equipe',
-    'Descrição / Referência'
-  ];
-
-  const pixRows: (string | number)[][] = [
-    [`LOTE DE PAGAMENTO PIX - ${monthName.toUpperCase()}/${year}`],
-    [],
-    pixHeaders
-  ];
-
-  items
-    .filter(item => item.employee.active && (item.displayNetSalary !== undefined ? item.displayNetSalary : item.netSalary) > 0)
-    .forEach(item => {
-      const emp = item.employee;
-      const teamDisplay = getTeamDisplay(emp.team, teams);
-      const netSal = item.displayNetSalary !== undefined ? item.displayNetSalary : item.netSalary;
-
-      pixRows.push([
-        emp.name,
-        emp.document || '',
-        emp.pixKeyType || 'PIX',
-        emp.pixKey || '',
-        roundCurrency(netSal),
-        teamDisplay.name,
-        `Salário ${monthName}/${year}`
-      ]);
-    });
-
-  pixRows.push([]);
-  pixRows.push([
-    'TOTAL A TRANSFERIR',
-    '',
-    '',
-    '',
-    roundCurrency(sumNet),
-    '',
-    ''
-  ]);
-
-  const wsPix = XLSX.utils.aoa_to_sheet(pixRows);
-  wsPix['!cols'] = getColumnWidths(pixRows.slice(2));
-  XLSX.utils.book_append_sheet(wb, wsPix, 'Lote PIX');
+  XLSX.utils.book_append_sheet(wb, wsDetailed, 'Fechamento Detalhado');
 
   // Trigger File Download
   const safeTeam = teamName.toLowerCase().replace(/[^a-z0-9]/g, '_');
   const fileName = `Fechamento_${safeTeam}_${year}_${String(monthNumber).padStart(2, '0')}.xlsx`;
   XLSX.writeFile(wb, fileName);
+}
+
+export function exportEmployeeClosingToCSV({
+  monthName,
+  monthNumber,
+  year,
+  items,
+  teams,
+  teamName = 'Geral',
+  delimiter = ',',
+}: {
+  monthName: string;
+  monthNumber: number;
+  year: number;
+  items: ExportClosingItem[];
+  teams: Team[];
+  teamName?: string;
+  delimiter?: ',' | ';';
+}) {
+  const activePayableItems = items.filter(
+    item => item.employee.active && (item.displayNetSalary !== undefined ? item.displayNetSalary : item.netSalary) > 0
+  );
+
+  const rows: BatchPaymentRow[] = activePayableItems.map(item => {
+    const emp = item.employee;
+    const netSal = item.displayNetSalary !== undefined ? item.displayNetSalary : item.netSalary;
+    return {
+      valor: Number(netSal || 0),
+      chave: emp.pixKey || '',
+      tipo: emp.pixKeyType || 'CPF',
+      nome: emp.name,
+      documento: emp.document || '',
+    };
+  });
+
+  const safeTeam = teamName.toLowerCase().replace(/[^a-z0-9]/g, '_');
+  const fileName = `Fechamento_${safeTeam}_${year}_${String(monthNumber).padStart(2, '0')}.csv`;
+  exportBatchPaymentToCSV({
+    rows,
+    fileName,
+    delimiter,
+  });
 }
 
 /**
@@ -661,7 +712,7 @@ export function exportEmployeesListToExcel({
       emp.level || '',
       emp.pixKeyType || 'PIX',
       emp.pixKey || '',
-      roundCurrency(emp.baseSalary),
+      Number(emp.baseSalary || 0).toFixed(2),
       formatBRDate(emp.admissionDate),
       emp.active ? 'Ativo' : 'Inativo',
       obs
@@ -678,7 +729,7 @@ export function exportEmployeesListToExcel({
     '',
     '',
     '',
-    roundCurrency(totalSalaries),
+    Number(totalSalaries || 0).toFixed(2),
     '',
     '',
     ''

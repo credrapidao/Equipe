@@ -1,8 +1,8 @@
 import React, { useState, useMemo } from 'react';
-import { Copy, Check, Calendar, Coins, UserCheck, AlertTriangle, Search, CheckCircle, FileSpreadsheet, Edit, Trash2, ArrowRightLeft, Users } from 'lucide-react';
+import { Copy, Check, Calendar, Coins, UserCheck, AlertTriangle, Search, CheckCircle, FileSpreadsheet, FileText, Edit, Trash2, ArrowRightLeft, Users } from 'lucide-react';
 import { Employee, EmployeeAbsence, EmployeeAdvance, Team, DEFAULT_TEAMS } from '../types';
 import { getTeamDisplay, getTeamColorStyle } from '../lib/teams';
-import { exportEmployeeClosingToExcel } from '../lib/excelExport';
+import { exportEmployeeClosingToExcel, exportEmployeeClosingToCSV } from '../lib/excelExport';
 
 interface EmployeeReportProps {
   employees: Employee[];
@@ -356,6 +356,33 @@ export function EmployeeReport({
     }
   };
 
+  const handleExportCSV = (teamId?: string, delimiter: ',' | ';' = ',') => {
+    const monthLabel = months.find(m => m.value === selectedMonth)?.label || `Mês ${selectedMonth}`;
+    if (teamId) {
+      const entry = teamSalariesMap[teamId];
+      if (!entry) return;
+      exportEmployeeClosingToCSV({
+        monthName: monthLabel,
+        monthNumber: selectedMonth,
+        year: selectedYear,
+        items: entry.salaries,
+        teams,
+        teamName: entry.team.name,
+        delimiter,
+      });
+    } else {
+      exportEmployeeClosingToCSV({
+        monthName: monthLabel,
+        monthNumber: selectedMonth,
+        year: selectedYear,
+        items: filteredSalaries,
+        teams,
+        teamName: 'Geral',
+        delimiter,
+      });
+    }
+  };
+
   // Filtered list of teams to display
   const displayedTeams = useMemo(() => {
     if (selectedTeamFilter === 'all') return teams;
@@ -495,10 +522,20 @@ export function EmployeeReport({
             onClick={() => handleExportExcel()}
             disabled={filteredSalaries.length === 0}
             className="flex items-center justify-center gap-1.5 rounded-xl bg-emerald-600 hover:bg-emerald-700 px-4 py-2.5 text-xs font-bold text-white transition-all shadow-sm active:scale-95 disabled:opacity-50"
-            title="Exportar Fechamento Geral para Planilha Excel (.xlsx)"
+            title="Exportar Fechamento Geral para Planilha Excel (.xlsx) com layout bancário (Valor, Chave, Tipo, Nome, Documento)"
           >
             <FileSpreadsheet size={15} />
             <span>Exportar Excel (.xlsx)</span>
+          </button>
+
+          <button
+            onClick={() => handleExportCSV()}
+            disabled={filteredSalaries.length === 0}
+            className="flex items-center justify-center gap-1.5 rounded-xl bg-teal-600 hover:bg-teal-700 px-4 py-2.5 text-xs font-bold text-white transition-all shadow-sm active:scale-95 disabled:opacity-50"
+            title="Exportar Fechamento Geral para CSV (.csv) com layout bancário (Valor, Chave, Tipo, Nome, Documento)"
+          >
+            <FileText size={15} />
+            <span>Exportar CSV (.csv)</span>
           </button>
         </div>
       </div>
@@ -653,7 +690,17 @@ export function EmployeeReport({
                     title={`Exportar Fechamento de ${team.name} para Excel (.xlsx)`}
                   >
                     <FileSpreadsheet size={14} />
-                    <span>Excel {team.name}</span>
+                    <span>Excel</span>
+                  </button>
+
+                  <button
+                    onClick={() => handleExportCSV(team.id)}
+                    disabled={salaries.length === 0}
+                    className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-teal-600 hover:bg-teal-700 text-white font-bold text-xs shadow-sm transition-all active:scale-95 disabled:opacity-50"
+                    title={`Exportar Fechamento de ${team.name} para CSV (.csv)`}
+                  >
+                    <FileText size={14} />
+                    <span>CSV</span>
                   </button>
 
                   <span className={`text-xs font-extrabold ${tStyle.text} ${tStyle.bg} border ${tStyle.border} px-3 py-1.5 rounded-xl`}>
