@@ -260,27 +260,30 @@ export function EmployeeReport({
     return map;
   }, [filteredSalaries, teams]);
 
-  // Format payment data for copying
-  const getPaymentText = (item: typeof employeeSalaries[0], teamId?: string) => {
-    const isSplit = item.employee.team === 'both' && (teamId === 'flash' || teamId === 'rapidao');
-    const netToPay = isSplit ? item.netSalary / 2 : item.netSalary;
+  // Helper to format Pix key type
+  const formatPixKeyType = (type?: string) => {
+    if (!type) return 'Não informado';
+    const t = type.trim().toLowerCase();
+    if (t === 'phone' || t === 'telefone' || t === 'celular') return 'Telefone';
+    if (t === 'random' || t === 'aleatoria' || t === 'aleatória' || t === 'evp') return 'Aleatória';
+    if (t === 'email' || t === 'e-mail') return 'E-mail';
+    if (t === 'cpf') return 'CPF';
+    if (t === 'cnpj') return 'CNPJ';
+    return type;
+  };
 
-    let text = `Nome: ${item.employee.name}`;
-    if (item.employee.role) {
-      text += `\nFunção: ${item.employee.role}`;
-    }
-    if (item.employee.level) {
-      text += `\nNível: ${item.employee.level}`;
-    }
-    text += `\nCPF: ${item.employee.document || 'Não informado'}`;
-    text += `\nChave Pix (${item.employee.pixKeyType || 'PIX'}): ${item.employee.pixKey || 'Não informada'}`;
-    text += `\nValor a Receber: ${formatCurrency(netToPay)}`;
-
-    return text;
+  // Format payment data for copying: only Nome, CPF, Tipo de chave e Chave Pix
+  const getPaymentText = (item: typeof employeeSalaries[0]) => {
+    return [
+      `Nome: ${item.employee.name}`,
+      `CPF: ${item.employee.document || 'Não informado'}`,
+      `Tipo de Chave: ${formatPixKeyType(item.employee.pixKeyType)}`,
+      `Chave Pix: ${item.employee.pixKey || 'Não informada'}`
+    ].join('\n');
   };
 
   const handleCopySingle = (item: typeof employeeSalaries[0], teamId?: string) => {
-    const text = getPaymentText(item, teamId);
+    const text = getPaymentText(item);
     navigator.clipboard.writeText(text).then(() => {
       setCopiedId(`${item.employee.id}_${teamId || 'all'}`);
       setTimeout(() => setCopiedId(null), 2000);
@@ -315,7 +318,7 @@ export function EmployeeReport({
     const teamTotalNet = entry.totals.totalNetSalary;
 
     const textHeader = `FECHAMENTO - ${teamTitle} (${monthLabel}/${selectedYear})\n--------------------\n`;
-    const textBody = activeSalaries.map(item => getPaymentText(item, teamId)).join('\n\n');
+    const textBody = activeSalaries.map(item => getPaymentText(item)).join('\n\n');
     const textFooter = `\n--------------------\nTOTAL DA EQUIPE: ${formatCurrency(teamTotalNet)}`;
 
     navigator.clipboard.writeText(textHeader + textBody + textFooter).then(() => {
@@ -781,13 +784,13 @@ export function EmployeeReport({
                           <td className="px-6 py-4.5 text-center">
                             <button
                               onClick={() => handleCopySingle(item, team.id)}
-                              disabled={item.netSalary === 0}
+                              disabled={!item.employee.pixKey && !item.employee.document}
                               className={`inline-flex items-center justify-center gap-1.5 px-3 py-2 rounded-xl text-xs font-bold transition-all border shadow-sm ${
                                 copiedId === `${item.employee.id}_${team.id}`
                                   ? 'bg-emerald-50 text-emerald-700 border-emerald-200'
                                   : 'bg-white text-zinc-700 border-zinc-200 hover:bg-zinc-50 active:scale-95 disabled:opacity-40'
                               }`}
-                              title="Copiar dados formatados do funcionário"
+                              title="Copiar Nome, CPF, Tipo de Chave e Chave Pix"
                             >
                               {copiedId === `${item.employee.id}_${team.id}` ? (
                                 <>
