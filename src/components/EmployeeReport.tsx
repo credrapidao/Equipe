@@ -1,8 +1,9 @@
 import React, { useState, useMemo } from 'react';
-import { Copy, Check, Calendar, Coins, UserCheck, AlertTriangle, Search, CheckCircle, FileSpreadsheet, FileText, Edit, Trash2, ArrowRightLeft, Users } from 'lucide-react';
+import { Copy, Check, Calendar, Coins, UserCheck, AlertTriangle, Search, CheckCircle, FileSpreadsheet, FileText, Edit, Trash2, ArrowRightLeft, Users, Settings2 } from 'lucide-react';
 import { Employee, EmployeeAbsence, EmployeeAdvance, Team, DEFAULT_TEAMS } from '../types';
 import { getTeamDisplay, getTeamColorStyle } from '../lib/teams';
-import { exportEmployeeClosingToExcel, exportEmployeeClosingToCSV } from '../lib/excelExport';
+import { exportEmployeeClosingToExcel, exportEmployeeClosingToCSV, exportEmployeeDetailedReportToExcel, BatchPaymentRow } from '../lib/excelExport';
+import { BatchExportModal } from './BatchExportModal';
 
 interface EmployeeReportProps {
   employees: Employee[];
@@ -108,6 +109,7 @@ export function EmployeeReport({
   const [bulkCopied, setBulkCopied] = useState<boolean>(false);
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedTeamFilter, setSelectedTeamFilter] = useState<string>('all');
+  const [showConfigModal, setShowConfigModal] = useState(false);
 
   const months = [
     { value: 1, label: 'Janeiro' },
@@ -331,7 +333,23 @@ export function EmployeeReport({
     });
   };
 
-  const handleExportExcel = (teamId?: string) => {
+  const closingBatchRows: BatchPaymentRow[] = useMemo(() => {
+    return filteredSalaries
+      .filter(item => item.employee.active && (item.displayNetSalary !== undefined ? item.displayNetSalary : item.netSalary) > 0)
+      .map(item => {
+        const emp = item.employee;
+        const netSal = item.displayNetSalary !== undefined ? item.displayNetSalary : item.netSalary;
+        return {
+          valor: Number(netSal || 0),
+          chave: emp.pixKey || '',
+          tipo: emp.pixKeyType || 'CPF',
+          nome: emp.name,
+          documento: emp.document || '',
+        };
+      });
+  }, [filteredSalaries]);
+
+  const handleExportExcel = (teamId?: string, format: 'xlsx' | 'xls' = 'xlsx') => {
     const monthLabel = months.find(m => m.value === selectedMonth)?.label || `Mês ${selectedMonth}`;
     if (teamId) {
       const entry = teamSalariesMap[teamId];
@@ -343,9 +361,36 @@ export function EmployeeReport({
         items: entry.salaries,
         teams,
         teamName: entry.team.name,
+        format,
       });
     } else {
       exportEmployeeClosingToExcel({
+        monthName: monthLabel,
+        monthNumber: selectedMonth,
+        year: selectedYear,
+        items: filteredSalaries,
+        teams,
+        teamName: 'Geral',
+        format,
+      });
+    }
+  };
+
+  const handleExportDetailed = (teamId?: string) => {
+    const monthLabel = months.find(m => m.value === selectedMonth)?.label || `Mês ${selectedMonth}`;
+    if (teamId) {
+      const entry = teamSalariesMap[teamId];
+      if (!entry) return;
+      exportEmployeeDetailedReportToExcel({
+        monthName: monthLabel,
+        monthNumber: selectedMonth,
+        year: selectedYear,
+        items: entry.salaries,
+        teams,
+        teamName: entry.team.name,
+      });
+    } else {
+      exportEmployeeDetailedReportToExcel({
         monthName: monthLabel,
         monthNumber: selectedMonth,
         year: selectedYear,
@@ -518,24 +563,54 @@ export function EmployeeReport({
             <span>{bulkCopied ? 'Geral Copiado!' : '📋 Copiar Geral'}</span>
           </button>
 
-          <button
-            onClick={() => handleExportExcel()}
-            disabled={filteredSalaries.length === 0}
-            className="flex items-center justify-center gap-1.5 rounded-xl bg-emerald-600 hover:bg-emerald-700 px-4 py-2.5 text-xs font-bold text-white transition-all shadow-sm active:scale-95 disabled:opacity-50"
-            title="Exportar Fechamento Geral para Planilha Excel (.xlsx) com layout bancário (Valor, Chave, Tipo, Nome, Documento)"
-          >
-            <FileSpreadsheet size={15} />
-            <span>Exportar Excel (.xlsx)</span>
-          </button>
+          {/* Lote Bancário PIX (1 aba limpa: valor | chave | tipo | nome | documento) */}
+          <div className="flex items-center rounded-xl border border-emerald-300 bg-emerald-50 overflow-hidden shadow-xs">
+            <button
+              onClick={() => handleExportExcel(undefined, 'xlsx')}
+              disabled={filteredSalaries.length === 0}
+              className="flex items-center gap-1.5 px-3 py-2 text-xs font-bold text-emerald-800 hover:bg-emerald-100 transition-colors border-r border-emerald-200 disabled:opacity-50"
+              title="Exportar Lote PIX em formato Excel moderno (.xlsx) - Apenas 1 aba com colunas: valor, chave, tipo, nome, documento"
+            >
+              <FileSpreadsheet size={14} />
+              <span>Lote .xlsx</span>
+            </button>
+            <button
+              onClick={() => handleExportExcel(undefined, 'xls')}
+              disabled={filteredSalaries.length === 0}
+              className="flex items-center gap-1.5 px-3 py-2 text-xs font-bold text-emerald-800 hover:bg-emerald-100 transition-colors border-r border-emerald-200 disabled:opacity-50"
+              title="Exportar Lote PIX em formato Excel clássico (.xls BIFF8) - Ideal para sistemas bancários que exigem .xls"
+            >
+              <FileSpreadsheet size={14} />
+              <span>Lote .xls</span>
+            </button>
+            <button
+              onClick={() => handleExportCSV()}
+              disabled={filteredSalaries.length === 0}
+              className="flex items-center gap-1.5 px-3 py-2 text-xs font-bold text-teal-800 hover:bg-teal-100 transition-colors border-r border-emerald-200 disabled:opacity-50"
+              title="Exportar Lote PIX em formato CSV (.csv) com colunas: valor, chave, tipo, nome, documento"
+            >
+              <FileText size={14} />
+              <span>Lote .csv</span>
+            </button>
+            <button
+              onClick={() => setShowConfigModal(true)}
+              disabled={closingBatchRows.length === 0}
+              className="flex items-center gap-1.5 px-3 py-2 text-xs font-bold text-emerald-800 hover:bg-emerald-100 transition-colors disabled:opacity-50"
+              title="Configurar nomes e ordem das colunas para o seu sistema bancário"
+            >
+              <Settings2 size={14} />
+              <span>Personalizar</span>
+            </button>
+          </div>
 
           <button
-            onClick={() => handleExportCSV()}
+            onClick={() => handleExportDetailed()}
             disabled={filteredSalaries.length === 0}
-            className="flex items-center justify-center gap-1.5 rounded-xl bg-teal-600 hover:bg-teal-700 px-4 py-2.5 text-xs font-bold text-white transition-all shadow-sm active:scale-95 disabled:opacity-50"
-            title="Exportar Fechamento Geral para CSV (.csv) com layout bancário (Valor, Chave, Tipo, Nome, Documento)"
+            className="flex items-center justify-center gap-1.5 rounded-xl border border-zinc-200 bg-white hover:bg-zinc-50 px-3 py-2 text-xs font-bold text-zinc-700 transition-all shadow-xs active:scale-95 disabled:opacity-50"
+            title="Exportar Relatório Detalhado com salários, faltas, adiantamentos e líquido para conferência e arquivo da empresa"
           >
-            <FileText size={15} />
-            <span>Exportar CSV (.csv)</span>
+            <FileSpreadsheet size={14} className="text-zinc-500" />
+            <span>Relatório Completo</span>
           </button>
         </div>
       </div>
@@ -683,24 +758,44 @@ export function EmployeeReport({
                     )}
                   </button>
 
-                  <button
-                    onClick={() => handleExportExcel(team.id)}
-                    disabled={salaries.length === 0}
-                    className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs shadow-sm transition-all active:scale-95 disabled:opacity-50"
-                    title={`Exportar Fechamento de ${team.name} para Excel (.xlsx)`}
-                  >
-                    <FileSpreadsheet size={14} />
-                    <span>Excel</span>
-                  </button>
+                  <div className="flex items-center rounded-xl border border-emerald-300 bg-emerald-50 overflow-hidden shadow-xs">
+                    <button
+                      onClick={() => handleExportExcel(team.id, 'xlsx')}
+                      disabled={salaries.length === 0}
+                      className="flex items-center gap-1 px-2.5 py-1.5 text-xs font-bold text-emerald-800 hover:bg-emerald-100 transition-colors border-r border-emerald-200 disabled:opacity-50"
+                      title={`Exportar Lote PIX de ${team.name} em Excel (.xlsx)`}
+                    >
+                      <FileSpreadsheet size={13} />
+                      <span>.xlsx</span>
+                    </button>
+                    <button
+                      onClick={() => handleExportExcel(team.id, 'xls')}
+                      disabled={salaries.length === 0}
+                      className="flex items-center gap-1 px-2.5 py-1.5 text-xs font-bold text-emerald-800 hover:bg-emerald-100 transition-colors border-r border-emerald-200 disabled:opacity-50"
+                      title={`Exportar Lote PIX de ${team.name} em Excel clássico (.xls)`}
+                    >
+                      <FileSpreadsheet size={13} />
+                      <span>.xls</span>
+                    </button>
+                    <button
+                      onClick={() => handleExportCSV(team.id)}
+                      disabled={salaries.length === 0}
+                      className="flex items-center gap-1 px-2.5 py-1.5 text-xs font-bold text-teal-800 hover:bg-teal-100 transition-colors disabled:opacity-50"
+                      title={`Exportar Lote PIX de ${team.name} em CSV (.csv)`}
+                    >
+                      <FileText size={13} />
+                      <span>.csv</span>
+                    </button>
+                  </div>
 
                   <button
-                    onClick={() => handleExportCSV(team.id)}
+                    onClick={() => handleExportDetailed(team.id)}
                     disabled={salaries.length === 0}
-                    className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-teal-600 hover:bg-teal-700 text-white font-bold text-xs shadow-sm transition-all active:scale-95 disabled:opacity-50"
-                    title={`Exportar Fechamento de ${team.name} para CSV (.csv)`}
+                    className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-xl border border-zinc-200 bg-white hover:bg-zinc-50 text-zinc-700 font-bold text-xs shadow-xs transition-all active:scale-95 disabled:opacity-50"
+                    title={`Exportar Relatório Detalhado de ${team.name}`}
                   >
-                    <FileText size={14} />
-                    <span>CSV</span>
+                    <FileSpreadsheet size={13} className="text-zinc-500" />
+                    <span>Detalhado</span>
                   </button>
 
                   <span className={`text-xs font-extrabold ${tStyle.text} ${tStyle.bg} border ${tStyle.border} px-3 py-1.5 rounded-xl`}>
@@ -905,6 +1000,14 @@ export function EmployeeReport({
         })}
       </div>
 
+      {/* Batch Export Customization Modal */}
+      <BatchExportModal
+        isOpen={showConfigModal}
+        onClose={() => setShowConfigModal(false)}
+        rows={closingBatchRows}
+        defaultFileName={`Lote_PIX_Fechamento_${selectedYear}_${String(selectedMonth).padStart(2, '0')}`}
+        title="Configurar Lote PIX - Fechamento de Folha"
+      />
     </div>
   );
 }

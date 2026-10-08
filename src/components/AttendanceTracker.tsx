@@ -7,15 +7,19 @@ import React, { useState, useEffect } from 'react';
 import { Calendar, ChevronLeft, ChevronRight, Check, X, Clock } from 'lucide-react';
 import { db } from '../lib/firebase';
 import { collection, query, where, onSnapshot, setDoc, doc, updateDoc, deleteDoc, serverTimestamp } from 'firebase/firestore';
-import { Promoter, Attendance, OperationType } from '../types';
+import { Promoter, Attendance, OperationType, Team } from '../types';
 import { handleFirestoreError, formatDate } from '../lib/utils';
+import { useTeams, getTeamDisplay, getTeamColorStyle } from '../lib/teams';
 
 interface AttendanceTrackerProps {
   promoters: Promoter[];
   readOnly?: boolean;
+  teams?: Team[];
 }
 
-export default function AttendanceTracker({ promoters, readOnly }: AttendanceTrackerProps) {
+export default function AttendanceTracker({ promoters, readOnly, teams: propTeams }: AttendanceTrackerProps) {
+  const { teams: hookTeams } = useTeams();
+  const teamsList = propTeams && propTeams.length > 0 ? propTeams : hookTeams;
   const [selectedDate, setSelectedDate] = useState(formatDate(new Date()));
   const [attendanceData, setAttendanceData] = useState<Record<string, Attendance>>({});
   const [loading, setLoading] = useState(true);
@@ -174,22 +178,30 @@ export default function AttendanceTracker({ promoters, readOnly }: AttendanceTra
             {promoters
               .filter(p => p.active || attendanceData[p.id])
               .map(promoter => {
-              const attendance = attendanceData[promoter.id];
-              return (
-                <tr key={promoter.id} className="hover:bg-zinc-50/50 transition-colors group">
-                  <td className="px-8 py-6">
-                    <div className="flex items-center gap-4">
-                      <div className={`h-10 w-10 rounded-full flex items-center justify-center text-sm font-bold transition-all ${
-                        attendance ? 'bg-brand-dark text-brand-lime shadow-lg' : 'bg-zinc-100 text-zinc-400'
-                      }`}>
-                        {promoter.name.charAt(0).toUpperCase()}
+                const attendance = attendanceData[promoter.id];
+                const teamDisplay = getTeamDisplay(promoter.team, teamsList);
+                const teamStyle = getTeamColorStyle(teamDisplay.color);
+                return (
+                  <tr key={promoter.id} className="hover:bg-zinc-50/50 transition-colors group">
+                    <td className="px-8 py-6">
+                      <div className="flex items-center gap-4">
+                        <div className={`h-10 w-10 rounded-full flex items-center justify-center text-sm font-bold transition-all ${
+                          attendance ? 'bg-brand-dark text-brand-lime shadow-lg' : 'bg-zinc-100 text-zinc-400'
+                        }`}>
+                          {promoter.name.charAt(0).toUpperCase()}
+                        </div>
+                        <div>
+                          <div className="flex items-center gap-2 flex-wrap">
+                            <span className="text-sm font-extrabold text-zinc-900">{promoter.name}</span>
+                            <span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[9px] font-bold uppercase tracking-wider ${teamStyle.bg} ${teamStyle.text} border ${teamStyle.border}`}>
+                              <span>{teamDisplay.icon}</span>
+                              <span>{teamDisplay.name}</span>
+                            </span>
+                          </div>
+                          <div className="text-[10px] font-bold text-zinc-400 uppercase tracking-wider mt-0.5">{promoter.document}</div>
+                        </div>
                       </div>
-                      <div>
-                        <div className="text-sm font-extrabold text-zinc-900">{promoter.name}</div>
-                        <div className="text-[10px] font-bold text-zinc-400 uppercase tracking-wider mt-0.5">{promoter.document}</div>
-                      </div>
-                    </div>
-                  </td>
+                    </td>
 
                   <td className="px-8 py-6">
                     <div className="flex items-center gap-3">

@@ -5,8 +5,9 @@
 
 import React, { useState } from 'react';
 import { Phone, Edit2, Key, CheckCircle2, XCircle, Eye, EyeOff, Shield } from 'lucide-react';
-import { Promoter } from '../types';
+import { Promoter, Team } from '../types';
 import { SecurityMasker } from '../lib/security';
+import { useTeams, getTeamDisplay, getTeamColorStyle } from '../lib/teams';
 
 interface PromoterCardProps {
   key?: string;
@@ -14,9 +15,15 @@ interface PromoterCardProps {
   onEdit: (p: Promoter) => void;
   onToggleStatus?: () => void;
   readOnly?: boolean;
+  teams?: Team[];
 }
 
-export default function PromoterCard({ promoter, onEdit, onToggleStatus, readOnly }: PromoterCardProps) {
+export default function PromoterCard({ promoter, onEdit, onToggleStatus, readOnly, teams: propTeams }: PromoterCardProps) {
+  const { teams: hookTeams } = useTeams();
+  const teamsList = propTeams && propTeams.length > 0 ? propTeams : hookTeams;
+  const teamDisplay = getTeamDisplay(promoter.team, teamsList);
+  const teamStyle = getTeamColorStyle(teamDisplay.color);
+
   const [showSensitive, setShowSensitive] = useState(false);
 
   const displayDocument = showSensitive ? promoter.document : SecurityMasker.maskCPF(promoter.document);
@@ -101,12 +108,9 @@ export default function PromoterCard({ promoter, onEdit, onToggleStatus, readOnl
               Inativo
             </div>
           )}
-          <div className={`flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold uppercase tracking-wider ${
-            promoter.team === 'rapidao' 
-              ? 'bg-amber-50 text-amber-700 border border-amber-100' 
-              : 'bg-indigo-50 text-indigo-700 border border-indigo-100'
-          }`}>
-            {promoter.team === 'rapidao' ? '🚀 Rapidão' : '⚡ Flash'}
+          <div className={`flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[10px] font-bold uppercase tracking-wider ${teamStyle.bg} ${teamStyle.text} border ${teamStyle.border}`}>
+            <span>{teamDisplay.icon}</span>
+            <span>{teamDisplay.name}</span>
           </div>
         </div>
         <div className="text-[10px] font-bold text-zinc-400 uppercase tracking-tighter flex items-center gap-1">

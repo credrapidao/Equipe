@@ -23,7 +23,8 @@ import {
   Target,
   Settings,
   Eye,
-  EyeOff
+  EyeOff,
+  Layers
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { 
@@ -47,13 +48,15 @@ import {
   where,
   getDocs
 } from 'firebase/firestore';
-import { Promoter, Attendance, Advance, OperationType, AppUser } from './types';
+import { Promoter, Attendance, Advance, OperationType, AppUser, Team } from './types';
 import { handleFirestoreError, formatDate, formatCurrency } from './lib/utils';
 import { AdminSecurity } from './lib/security';
+import { useTeams, getTeamDisplay, getTeamColorStyle } from './lib/teams';
 
 // Components
 import PromoterCard from './components/PromoterCard';
 import PromoterModal from './components/PromoterModal';
+import { TeamModal } from './components/TeamModal';
 import AttendanceTracker from './components/AttendanceTracker';
 import LeadManager from './components/LeadManager';
 import AdvanceManager from './components/AdvanceManager';
@@ -78,10 +81,12 @@ export default function App() {
   const [allAdvances, setAllAdvances] = useState<Advance[]>([]);
   const [activeTab, setActiveTab] = useState<'dashboard' | 'promoters' | 'attendance' | 'leads' | 'advances' | 'reports' | 'employees' | 'users' | 'settings'>('dashboard');
   const [isPromoterModalOpen, setIsPromoterModalOpen] = useState(false);
+  const [isTeamModalOpen, setIsTeamModalOpen] = useState(false);
   const [editingPromoter, setEditingPromoter] = useState<Promoter | null>(null);
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
   const [showInactive, setShowInactive] = useState(false);
-  const [selectedTeam, setSelectedTeam] = useState<'all' | 'flash' | 'rapidao'>('all');
+  const { teams } = useTeams();
+  const [selectedTeam, setSelectedTeam] = useState<string>('all');
   const [searchQuery, setSearchQuery] = useState('');
 
   // Lock selectedTeam if user has a team restriction
@@ -759,7 +764,7 @@ export default function App() {
             {/* Segmented control for Team Filter */}
             {activeTab !== 'employees' && activeTab !== 'users' && activeTab !== 'settings' && (
               (!user?.team || user.team === 'all') ? (
-                <div className="flex bg-zinc-200/50 p-1 rounded-2xl w-fit border border-zinc-200 shadow-inner">
+                <div className="flex bg-zinc-200/50 p-1 rounded-2xl w-fit border border-zinc-200 shadow-inner flex-wrap gap-1">
                   <button
                     onClick={() => setSelectedTeam('all')}
                     className={`px-4 py-2 rounded-xl font-bold text-xs uppercase tracking-wider transition-all flex items-center gap-1.5 ${
@@ -770,43 +775,57 @@ export default function App() {
                   >
                     👥 Todos
                   </button>
-                  <button
-                    onClick={() => setSelectedTeam('flash')}
-                    className={`px-4 py-2 rounded-xl font-bold text-xs uppercase tracking-wider transition-all flex items-center gap-1.5 ${
-                      selectedTeam === 'flash'
-                        ? 'bg-indigo-600 text-white shadow-sm'
-                        : 'text-zinc-500 hover:text-indigo-600'
-                    }`}
-                  >
-                    ⚡ Time Flash
-                  </button>
-                  <button
-                    onClick={() => setSelectedTeam('rapidao')}
-                    className={`px-4 py-2 rounded-xl font-bold text-xs uppercase tracking-wider transition-all flex items-center gap-1.5 ${
-                      selectedTeam === 'rapidao'
-                        ? 'bg-amber-500 text-white shadow-sm'
-                        : 'text-zinc-500 hover:text-amber-600'
-                    }`}
-                  >
-                    🚀 Time Rapidão
-                  </button>
+                  {teams.map(t => {
+                    const isSelected = selectedTeam === t.id;
+                    const style = getTeamColorStyle(t.color);
+                    return (
+                      <button
+                        key={t.id}
+                        onClick={() => setSelectedTeam(t.id)}
+                        className={`px-4 py-2 rounded-xl font-bold text-xs uppercase tracking-wider transition-all flex items-center gap-1.5 ${
+                          isSelected
+                            ? `${style.badge} shadow-sm`
+                            : 'text-zinc-500 hover:text-zinc-800'
+                        }`}
+                      >
+                        <span>{t.icon || '👥'}</span>
+                        <span>{t.name}</span>
+                      </button>
+                    );
+                  })}
                 </div>
               ) : (
-                <div className="inline-flex items-center gap-2 px-4 py-2 rounded-2xl bg-white border border-zinc-200 text-zinc-700 font-bold text-sm shadow-sm select-none">
-                  {user.team === 'flash' ? '⚡ Time Flash' : '🚀 Time Rapidão'}
-                </div>
+                (() => {
+                  const display = getTeamDisplay(user.team, teams);
+                  return (
+                    <div className="inline-flex items-center gap-2 px-4 py-2 rounded-2xl bg-white border border-zinc-200 text-zinc-700 font-bold text-sm shadow-sm select-none">
+                      <span>{display.icon}</span>
+                      <span>{display.name}</span>
+                    </div>
+                  );
+                })()
               )
             )}
           </div>
 
           {activeTab !== 'employees' && activeTab !== 'reports' && activeTab !== 'users' && activeTab !== 'settings' && userRole !== 'viewer' && (
-            <button 
-              onClick={() => { setEditingPromoter(null); setIsPromoterModalOpen(true); }}
-              className="inline-flex items-center justify-center gap-2 rounded-xl bg-brand-dark px-6 py-3 text-sm font-bold text-brand-lime transition-all hover:bg-brand-surface border border-brand-lime/20 shadow-xl shadow-brand-lime/10 active:scale-95 self-start lg:self-end"
-            >
-              <Plus size={20} />
-              Adicionar Promotor
-            </button>
+            <div className="flex items-center gap-2 flex-wrap self-start lg:self-end">
+              <button 
+                onClick={() => setIsTeamModalOpen(true)}
+                className="inline-flex items-center justify-center gap-2 rounded-xl bg-white border border-zinc-200 px-4 py-3 text-sm font-bold text-zinc-700 transition-all hover:bg-zinc-50 hover:text-zinc-900 shadow-sm active:scale-95"
+                title="Cadastrar uma nova equipe no sistema"
+              >
+                <Layers size={18} className="text-indigo-600" />
+                Nova Equipe
+              </button>
+              <button 
+                onClick={() => { setEditingPromoter(null); setIsPromoterModalOpen(true); }}
+                className="inline-flex items-center justify-center gap-2 rounded-xl bg-brand-dark px-6 py-3 text-sm font-bold text-brand-lime transition-all hover:bg-brand-surface border border-brand-lime/20 shadow-xl shadow-brand-lime/10 active:scale-95"
+              >
+                <Plus size={20} />
+                Adicionar Promotor
+              </button>
+            </div>
           )}
         </header>
 
@@ -894,13 +913,23 @@ export default function App() {
                       </div>
 
                       {userRole !== 'viewer' && (
-                        <button 
-                          onClick={() => { setEditingPromoter(null); setIsPromoterModalOpen(true); }}
-                          className="w-full sm:w-auto inline-flex items-center justify-center gap-2 rounded-xl bg-brand-dark px-6 py-2.5 text-sm font-semibold text-brand-lime transition-all hover:bg-brand-surface border border-brand-lime/20 shadow-lg shadow-brand-lime/5"
-                        >
-                          <Plus size={18} />
-                          Adicionar Promotor
-                        </button>
+                        <div className="flex items-center gap-2 flex-wrap">
+                          <button 
+                            onClick={() => setIsTeamModalOpen(true)}
+                            className="inline-flex items-center justify-center gap-1.5 rounded-xl bg-white border border-zinc-200 px-3.5 py-2.5 text-xs font-bold text-zinc-700 transition-all hover:bg-zinc-50 hover:text-zinc-900 shadow-xs active:scale-95"
+                            title="Cadastrar uma nova equipe no sistema"
+                          >
+                            <Layers size={15} className="text-indigo-600" />
+                            <span>Nova Equipe</span>
+                          </button>
+                          <button 
+                            onClick={() => { setEditingPromoter(null); setIsPromoterModalOpen(true); }}
+                            className="w-full sm:w-auto inline-flex items-center justify-center gap-2 rounded-xl bg-brand-dark px-5 py-2.5 text-xs font-bold text-brand-lime transition-all hover:bg-brand-surface border border-brand-lime/20 shadow-lg shadow-brand-lime/5"
+                          >
+                            <Plus size={16} />
+                            <span>Adicionar Promotor</span>
+                          </button>
+                        </div>
                       )}
                     </div>
                   </div>
@@ -911,6 +940,7 @@ export default function App() {
                       <PromoterCard 
                         key={promoter.id} 
                         promoter={promoter} 
+                        teams={teams}
                         onEdit={(p) => { if (userRole === 'viewer') return; setEditingPromoter(p); setIsPromoterModalOpen(true); }}
                         onToggleStatus={userRole === 'viewer' ? undefined : () => handleTogglePromoterStatus(promoter)}
                         readOnly={userRole === 'viewer'}
@@ -921,7 +951,7 @@ export default function App() {
               )}
 
               {activeTab === 'attendance' && (
-                <AttendanceTracker promoters={filteredPromoters} readOnly={userRole === 'viewer'} />
+                <AttendanceTracker promoters={filteredPromoters} readOnly={userRole === 'viewer'} teams={teams} />
               )}
 
               {activeTab === 'leads' && (
@@ -968,6 +998,12 @@ export default function App() {
         isOpen={isPromoterModalOpen} 
         onClose={() => setIsPromoterModalOpen(false)}
         editingPromoter={editingPromoter}
+        teams={teams}
+      />
+
+      <TeamModal
+        isOpen={isTeamModalOpen}
+        onClose={() => setIsTeamModalOpen(false)}
       />
     </div>
   );

@@ -105,7 +105,7 @@ export interface AppUser {
   password?: string;
   displayName: string;
   role: 'admin' | 'viewer';
-  team: 'all' | 'flash' | 'rapidao';
+  team: 'all' | 'flash' | 'rapidao' | string;
   createdAt?: any;
 }
 

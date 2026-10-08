@@ -4,13 +4,15 @@
  */
 
 import React, { useState, useEffect } from 'react';
-import { Wallet, Plus, Trash2, CheckCircle2, Clock, DollarSign, Copy, Check, PlusCircle, XCircle, Search, FileSpreadsheet, FileText, ChevronDown } from 'lucide-react';
+import { Wallet, Plus, Trash2, CheckCircle2, Clock, DollarSign, Copy, Check, PlusCircle, XCircle, Search, FileSpreadsheet, FileText, ChevronDown, Settings2, RotateCcw, Undo2, AlertTriangle } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { db } from '../lib/firebase';
 import { collection, query, onSnapshot, addDoc, updateDoc, doc, deleteDoc, serverTimestamp, orderBy, where, limit, getDocs, writeBatch } from 'firebase/firestore';
 import { Promoter, Advance, OperationType } from '../types';
 import { handleFirestoreError, formatCurrency, formatDate } from '../lib/utils';
 import { exportPromoterAdvancesToExcel, exportPromoterAdvancesToCSV, exportBatchPaymentToExcel, exportBatchPaymentToCSV, BatchPaymentRow, roundCurrency } from '../lib/excelExport';
+import { BatchExportModal } from './BatchExportModal';
+import { useTeams, getTeamDisplay } from '../lib/teams';
 
 interface AdvanceManagerProps {
   promoters: Promoter[];
@@ -36,6 +38,7 @@ export default function AdvanceManager({ promoters, readOnly }: AdvanceManagerPr
   const [searchTerm, setSearchTerm] = useState('');
   const [showExportMenu, setShowExportMenu] = useState(false);
   const [showHistoryExportMenu, setShowHistoryExportMenu] = useState(false);
+  const [showConfigModal, setShowConfigModal] = useState(false);
 
   // 1. DATA FLATTENING
   const advances: Advance[] = React.useMemo(() => {
@@ -202,12 +205,20 @@ export default function AdvanceManager({ promoters, readOnly }: AdvanceManagerPr
           }
         }
       } else {
-        const paid = attendanceDocs.filter(a => a.paymentStatus === 'paid');
-        if (paid.length > 0) {
-          batch.update(doc(db, 'promoters', advance.promoterId, 'attendance', paid[paid.length - 1].id), { 
+        const paidDocs = attendanceDocs
+          .filter(a => a.paymentStatus === 'paid')
+          .sort((a, b) => b.date.localeCompare(a.date));
+
+        let amountToRevert = advance.amount;
+        for (const att of paidDocs) {
+          if (amountToRevert <= 0.01) break;
+          const rate = att.dailyRate || 100;
+          const value = att.status === 'half-day' ? rate / 2 : (att.status === 'absent' ? 0 : rate);
+          batch.update(doc(db, 'promoters', advance.promoterId, 'attendance', att.id), { 
             paymentStatus: 'pending',
             updatedAt: serverTimestamp()
           });
+          amountToRevert -= value;
         }
       }
       await batch.commit();
@@ -490,6 +501,13 @@ export default function AdvanceManager({ promoters, readOnly }: AdvanceManagerPr
     }
   };
 
+  const getPromoterPixKey = (p?: Promoter) => {
+    if (!p) return '';
+    if (p.pixKey && p.pixKey.trim()) return p.pixKey.trim();
+    if (p.pixKeyType === 'CPF' && p.document) return p.document.replace(/\D/g, '');
+    return p.document ? p.document.replace(/\D/g, '') : '';
+  };
+
   const getItemsToExport = (): BatchPaymentRow[] => {
     const itemsToExport: BatchPaymentRow[] = [];
 
@@ -502,7 +520,7 @@ export default function AdvanceManager({ promoters, readOnly }: AdvanceManagerPr
           const prom = promoters.find(p => p.id === a.promoterId);
           itemsToExport.push({
             valor: roundCurrency(a.amount),
-            chave: prom?.pixKey || '',
+            chave: getPromoterPixKey(prom),
             tipo: prom?.pixKeyType || 'CPF',
             nome: a.promoterName || prom?.name || 'Promotor',
             documento: prom?.document || '',
@@ -523,7 +541,7 @@ export default function AdvanceManager({ promoters, readOnly }: AdvanceManagerPr
           if (net >= 0.01) {
             itemsToExport.push({
               valor: roundCurrency(net),
-              chave: p.pixKey || '',
+              chave: getPromoterPixKey(p),
               tipo: p.pixKeyType || 'CPF',
               nome: p.name || '',
               documento: p.document || '',
@@ -543,7 +561,7 @@ export default function AdvanceManager({ promoters, readOnly }: AdvanceManagerPr
         if (prom && item.amount >= 0.01) {
           itemsToExport.push({
             valor: roundCurrency(item.amount),
-            chave: prom.pixKey || '',
+            chave: getPromoterPixKey(prom),
             tipo: prom.pixKeyType || 'CPF',
             nome: prom.name || '',
             documento: prom.document || '',
@@ -563,7 +581,7 @@ export default function AdvanceManager({ promoters, readOnly }: AdvanceManagerPr
         if (net >= 0.01) {
           itemsToExport.push({
             valor: roundCurrency(net),
-            chave: p.pixKey || '',
+            chave: getPromoterPixKey(p),
             tipo: p.pixKeyType || 'CPF',
             nome: p.name || '',
             documento: p.document || '',
@@ -581,7 +599,7 @@ export default function AdvanceManager({ promoters, readOnly }: AdvanceManagerPr
           const prom = promoters.find(p => p.id === a.promoterId);
           itemsToExport.push({
             valor: roundCurrency(a.amount),
-            chave: prom?.pixKey || '',
+            chave: getPromoterPixKey(prom),
             tipo: prom?.pixKeyType || 'CPF',
             nome: a.promoterName || prom?.name || 'Promotor',
             documento: prom?.document || '',
@@ -595,12 +613,34 @@ export default function AdvanceManager({ promoters, readOnly }: AdvanceManagerPr
     return itemsToExport;
   };
 
-  const handleExportAdvances = (format: 'xlsx' | 'csv', delimiter: ',' | ';' = ',') => {
+  const handleExportAdvances = (format: 'xlsx' | 'xls' | 'csv', delimiter: ',' | ';' = ',') => {
     const itemsToExport = getItemsToExport();
 
     if (itemsToExport.length === 0) {
       alert('Não há adiantamentos ou saldos pendentes no momento para exportar.');
       return;
+    }
+
+    // Check if user saved custom config
+    let customHeaders: string[] | undefined;
+    let columnOrder: Array<'valor' | 'chave' | 'tipo' | 'nome' | 'documento'> | undefined;
+    try {
+      const saved = localStorage.getItem('pix_batch_export_config_v2');
+      if (saved) {
+        const parsed = JSON.parse(saved);
+        if (parsed.columns && Array.isArray(parsed.columns)) {
+          customHeaders = parsed.columns.map((c: any) => c.headerName);
+          columnOrder = parsed.columns.map((c: any) => c.id);
+        }
+      }
+    } catch {
+      // Ignore
+    }
+
+    // Default to the bank system headers: RECEBEDOR | DOCUMENTO | CHAVE PIX | TIPO | VALOR
+    if (!customHeaders) {
+      customHeaders = ['RECEBEDOR', 'DOCUMENTO', 'CHAVE PIX', 'TIPO', 'VALOR'];
+      columnOrder = ['nome', 'documento', 'chave', 'tipo', 'valor'];
     }
 
     const todayStr = formatDate(new Date());
@@ -609,12 +649,17 @@ export default function AdvanceManager({ promoters, readOnly }: AdvanceManagerPr
         rows: itemsToExport,
         fileName: `Lote_PIX_Adiantamentos_Pendentes_${todayStr}.csv`,
         delimiter,
+        customHeaders,
+        columnOrder,
       });
     } else {
       exportBatchPaymentToExcel({
         rows: itemsToExport,
-        fileName: `Lote_PIX_Adiantamentos_Pendentes_${todayStr}.xlsx`,
+        fileName: `Lote_PIX_Adiantamentos_Pendentes_${todayStr}.${format}`,
         title: 'Lote PIX - Adiantamentos Pendentes de Promotores',
+        format,
+        customHeaders,
+        columnOrder,
       });
     }
   };
@@ -764,6 +809,140 @@ export default function AdvanceManager({ promoters, readOnly }: AdvanceManagerPr
 
     return list.sort((a, b) => b.date.localeCompare(a.date));
   }, [promoters, advances, weeklyPending, weeklyPaidAtt, searchTerm]);
+
+  // 3. MULTI-TEAM RESCUE / UNDO SYSTEM (DESFAZER QUITAÇÃO POR TIME)
+  const { teams } = useTeams();
+  const [selectedUndoTeam, setSelectedUndoTeam] = useState<string>('all');
+  const [isRevertingTeam, setIsRevertingTeam] = useState(false);
+
+  // Filter promoters based on selected team ('all' or specific teamId)
+  const targetPromotersForUndo = React.useMemo(() => {
+    if (selectedUndoTeam === 'all') return promoters;
+    return promoters.filter(p => (p.team || 'flash') === selectedUndoTeam);
+  }, [promoters, selectedUndoTeam]);
+
+  const targetPromoterIdsForUndo = React.useMemo(() => {
+    return new Set(targetPromotersForUndo.map(p => p.id));
+  }, [targetPromotersForUndo]);
+
+  const paidAdvancesForSelectedTeam = React.useMemo(() => {
+    return advances.filter(a => targetPromoterIdsForUndo.has(a.promoterId) && a.status === 'paid');
+  }, [advances, targetPromoterIdsForUndo]);
+
+  const paidTotalForSelectedTeam = React.useMemo(() => {
+    return paidAdvancesForSelectedTeam.reduce((sum, a) => sum + a.amount, 0);
+  }, [paidAdvancesForSelectedTeam]);
+
+  const getTeamNameLabel = (teamId: string) => {
+    if (teamId === 'all') return 'Todos os Times';
+    const display = getTeamDisplay(teamId, teams);
+    return `${display.icon} ${display.name}`;
+  };
+
+  const handleRevertTeamToPending = async () => {
+    if (paidAdvancesForSelectedTeam.length === 0 || processing || isRevertingTeam) return;
+
+    const teamLabel = getTeamNameLabel(selectedUndoTeam);
+
+    if (!window.confirm(
+      `Deseja DESFAZER A QUITAÇÃO de ${paidAdvancesForSelectedTeam.length} adiantamento(s) de [${teamLabel}]?\n` +
+      `Valor Total: ${formatCurrency(paidTotalForSelectedTeam)}\n\n` +
+      `Esta ação irá:\n` +
+      `1. Alterar o status dos adiantamentos de volta para "Pendente"\n` +
+      `2. Reabrir as diárias correspondentes de volta para status "Pendente"\n` +
+      `3. Restaurar a visualização para conferência e novo pagamento`
+    )) {
+      return;
+    }
+
+    setProcessing(true);
+    setIsRevertingTeam(true);
+    try {
+      for (const advance of paidAdvancesForSelectedTeam) {
+        const batch = writeBatch(db);
+        const advRef = doc(db, 'promoters', advance.promoterId, 'advances', advance.id);
+        batch.update(advRef, { status: 'pending', updatedAt: serverTimestamp() });
+
+        const attendanceSnapshot = await getDocs(collection(db, 'promoters', advance.promoterId, 'attendance'));
+        const paidDocs = attendanceSnapshot.docs
+          .map(doc => ({ id: doc.id, ...doc.data() } as any))
+          .filter(a => a.paymentStatus === 'paid')
+          .sort((a, b) => b.date.localeCompare(a.date));
+
+        let amountToRevert = advance.amount;
+        for (const att of paidDocs) {
+          if (amountToRevert <= 0.01) break;
+          const rate = att.dailyRate || 100;
+          const value = att.status === 'half-day' ? rate / 2 : (att.status === 'absent' ? 0 : rate);
+          batch.update(doc(db, 'promoters', advance.promoterId, 'attendance', att.id), { 
+            paymentStatus: 'pending',
+            updatedAt: serverTimestamp()
+          });
+          amountToRevert -= value;
+        }
+        await batch.commit();
+      }
+      alert(`Sucesso! ${paidAdvancesForSelectedTeam.length} adiantamento(s) de [${teamLabel}] foram revertidos para "Pendente"!`);
+    } catch (err) {
+      console.error('Erro ao reverter equipe:', err);
+      alert('Erro ao reverter: ' + (err instanceof Error ? err.message : String(err)));
+      handleFirestoreError(err, OperationType.UPDATE, 'promoters/advances');
+    } finally {
+      setProcessing(false);
+      setIsRevertingTeam(false);
+    }
+  };
+
+  const handleDeleteTeamAccidentalAdvances = async () => {
+    if (paidAdvancesForSelectedTeam.length === 0 || processing || isRevertingTeam) return;
+
+    const teamLabel = getTeamNameLabel(selectedUndoTeam);
+
+    if (!window.confirm(
+      `Deseja EXCLUIR os ${paidAdvancesForSelectedTeam.length} adiantamento(s) gerados por engano de [${teamLabel}] e DEVOLVER o saldo para as diárias?\n` +
+      `Valor Total: ${formatCurrency(paidTotalForSelectedTeam)}\n\n` +
+      `Esta ação remove os registros de adiantamento criados por engano e reabre 100% das diárias na aba "Aguardando Registro".`
+    )) {
+      return;
+    }
+
+    setProcessing(true);
+    setIsRevertingTeam(true);
+    try {
+      for (const advance of paidAdvancesForSelectedTeam) {
+        const batch = writeBatch(db);
+
+        const attendanceSnapshot = await getDocs(collection(db, 'promoters', advance.promoterId, 'attendance'));
+        const paidDocs = attendanceSnapshot.docs
+          .map(doc => ({ id: doc.id, ...doc.data() } as any))
+          .filter(a => a.paymentStatus === 'paid')
+          .sort((a, b) => b.date.localeCompare(a.date));
+
+        let amountToRevert = advance.amount;
+        for (const att of paidDocs) {
+          if (amountToRevert <= 0.01) break;
+          const rate = att.dailyRate || 100;
+          const value = att.status === 'half-day' ? rate / 2 : (att.status === 'absent' ? 0 : rate);
+          batch.update(doc(db, 'promoters', advance.promoterId, 'attendance', att.id), { 
+            paymentStatus: 'pending',
+            updatedAt: serverTimestamp()
+          });
+          amountToRevert -= value;
+        }
+
+        batch.delete(doc(db, 'promoters', advance.promoterId, 'advances', advance.id));
+        await batch.commit();
+      }
+      alert(`Sucesso! Adiantamentos de [${teamLabel}] excluídos e saldos devolvidos para "Aguardando Registro"!`);
+    } catch (err) {
+      console.error('Erro ao excluir adiantamentos da equipe:', err);
+      alert('Erro ao excluir: ' + (err instanceof Error ? err.message : String(err)));
+      handleFirestoreError(err, OperationType.DELETE, 'promoters/advances');
+    } finally {
+      setProcessing(false);
+      setIsRevertingTeam(false);
+    }
+  };
 
   return (
     <div className="space-y-6">
@@ -942,14 +1121,21 @@ export default function AdvanceManager({ promoters, readOnly }: AdvanceManagerPr
                         className="text-xs font-bold text-emerald-700 px-2.5 py-1 hover:bg-emerald-100 flex items-center gap-1 transition-colors border-r border-emerald-200"
                         title="Exportar pendentes em Excel (.xlsx)"
                       >
-                        <FileSpreadsheet size={12} /> Excel (.xlsx)
+                        <FileSpreadsheet size={12} /> .xlsx
+                      </button>
+                      <button 
+                        onClick={() => handleExportAdvances('xls')} 
+                        className="text-xs font-bold text-emerald-700 px-2.5 py-1 hover:bg-emerald-100 flex items-center gap-1 transition-colors border-r border-emerald-200"
+                        title="Exportar pendentes em Excel clássico (.xls)"
+                      >
+                        <FileSpreadsheet size={12} /> .xls
                       </button>
                       <button 
                         onClick={() => handleExportAdvances('csv', ',')} 
                         className="text-xs font-bold text-emerald-700 px-2.5 py-1 hover:bg-emerald-100 flex items-center gap-1 transition-colors"
                         title="Exportar pendentes em CSV (.csv) para lote de pagamentos"
                       >
-                        <FileText size={12} /> CSV (.csv)
+                        <FileText size={12} /> .csv
                       </button>
                       <button 
                         onClick={() => setShowExportMenu(prev => !prev)}
@@ -971,7 +1157,17 @@ export default function AdvanceManager({ promoters, readOnly }: AdvanceManagerPr
                           <FileSpreadsheet size={14} className="text-emerald-600 shrink-0" />
                           <div className="flex flex-col text-left">
                             <span>Planilha Excel (.xlsx)</span>
-                            <span className="text-[10px] text-zinc-400 font-normal">2 abas: Lote bancário + Conferência</span>
+                            <span className="text-[10px] text-zinc-400 font-normal">Lote PIX limpo (valor, chave, tipo, nome, documento)</span>
+                          </div>
+                        </button>
+                        <button
+                          onClick={() => { handleExportAdvances('xls'); setShowExportMenu(false); }}
+                          className="w-full px-3 py-2 text-xs font-bold text-zinc-700 hover:bg-zinc-50 flex items-center gap-2 border-t border-zinc-100"
+                        >
+                          <FileSpreadsheet size={14} className="text-teal-600 shrink-0" />
+                          <div className="flex flex-col text-left">
+                            <span>Planilha Excel Clássica (.xls)</span>
+                            <span className="text-[10px] text-zinc-400 font-normal">Formato BIFF8 (sistemas bancários legados)</span>
                           </div>
                         </button>
                         <button
@@ -992,6 +1188,16 @@ export default function AdvanceManager({ promoters, readOnly }: AdvanceManagerPr
                           <div className="flex flex-col text-left">
                             <span>Arquivo CSV (.csv - Ponto e Vírgula)</span>
                             <span className="text-[10px] text-zinc-400 font-normal">Padrão Excel Brasil / Itaú</span>
+                          </div>
+                        </button>
+                        <button
+                          onClick={() => { setShowConfigModal(true); setShowExportMenu(false); }}
+                          className="w-full px-3 py-2 text-xs font-bold text-emerald-800 bg-emerald-50/50 hover:bg-emerald-100 flex items-center gap-2 border-t border-emerald-100 transition-colors"
+                        >
+                          <Settings2 size={14} className="text-emerald-700 shrink-0" />
+                          <div className="flex flex-col text-left">
+                            <span>⚙️ Configurar Layout / Prévia</span>
+                            <span className="text-[10px] text-emerald-600 font-normal">Personalizar colunas para o seu sistema</span>
                           </div>
                         </button>
                       </div>
@@ -1160,14 +1366,21 @@ export default function AdvanceManager({ promoters, readOnly }: AdvanceManagerPr
                     className="text-emerald-700 px-3 py-2 font-bold text-xs hover:bg-emerald-100 transition-all flex items-center gap-1.5 border-r border-emerald-200"
                     title="Exportar lote PIX em Excel (.xlsx)"
                   >
-                    <FileSpreadsheet size={14} /> Lote Excel (.xlsx)
+                    <FileSpreadsheet size={14} /> .xlsx
+                  </button>
+                  <button 
+                    onClick={() => handleExportAdvances('xls')}
+                    className="text-emerald-700 px-3 py-2 font-bold text-xs hover:bg-emerald-100 transition-all flex items-center gap-1.5 border-r border-emerald-200"
+                    title="Exportar lote PIX em Excel clássico (.xls)"
+                  >
+                    <FileSpreadsheet size={14} /> .xls
                   </button>
                   <button 
                     onClick={() => handleExportAdvances('csv', ',')}
                     className="text-emerald-700 px-3 py-2 font-bold text-xs hover:bg-emerald-100 transition-all flex items-center gap-1.5"
                     title="Exportar lote PIX em CSV (.csv)"
                   >
-                    <FileText size={14} /> Lote CSV (.csv)
+                    <FileText size={14} /> .csv
                   </button>
                   <button 
                     onClick={() => setShowHistoryExportMenu(prev => !prev)}
@@ -1189,7 +1402,17 @@ export default function AdvanceManager({ promoters, readOnly }: AdvanceManagerPr
                       <FileSpreadsheet size={14} className="text-emerald-600 shrink-0" />
                       <div className="flex flex-col text-left">
                         <span>Planilha Excel (.xlsx)</span>
-                        <span className="text-[10px] text-zinc-400 font-normal">Formato bancário + Conferência</span>
+                        <span className="text-[10px] text-zinc-400 font-normal">Lote PIX limpo (valor, chave, tipo, nome, documento)</span>
+                      </div>
+                    </button>
+                    <button
+                      onClick={() => { handleExportAdvances('xls'); setShowHistoryExportMenu(false); }}
+                      className="w-full px-3 py-2 text-xs font-bold text-zinc-700 hover:bg-zinc-50 flex items-center gap-2 border-t border-zinc-100"
+                    >
+                      <FileSpreadsheet size={14} className="text-teal-600 shrink-0" />
+                      <div className="flex flex-col text-left">
+                        <span>Planilha Excel Clássica (.xls)</span>
+                        <span className="text-[10px] text-zinc-400 font-normal">Formato BIFF8 (sistemas bancários legados)</span>
                       </div>
                     </button>
                     <button
@@ -1210,6 +1433,16 @@ export default function AdvanceManager({ promoters, readOnly }: AdvanceManagerPr
                       <div className="flex flex-col text-left">
                         <span>Arquivo CSV (.csv - Ponto e Vírgula)</span>
                         <span className="text-[10px] text-zinc-400 font-normal">Padrão Excel Brasil / Itaú</span>
+                      </div>
+                    </button>
+                    <button
+                      onClick={() => { setShowConfigModal(true); setShowHistoryExportMenu(false); }}
+                      className="w-full px-3 py-2 text-xs font-bold text-emerald-800 bg-emerald-50/50 hover:bg-emerald-100 flex items-center gap-2 border-t border-emerald-100 transition-colors"
+                    >
+                      <Settings2 size={14} className="text-emerald-700 shrink-0" />
+                      <div className="flex flex-col text-left">
+                        <span>⚙️ Configurar Layout / Prévia</span>
+                        <span className="text-[10px] text-emerald-600 font-normal">Personalizar colunas para o seu sistema</span>
                       </div>
                     </button>
                   </div>
@@ -1416,6 +1649,116 @@ export default function AdvanceManager({ promoters, readOnly }: AdvanceManagerPr
           </motion.div>
         )}
       </AnimatePresence>
+
+      {/* 5. PAINEL INFERIOR: ESTORNO E DESFAZER QUITAÇÕES POR TIME */}
+      {!readOnly && (
+        <div className="mt-8 border border-zinc-200 bg-white rounded-2xl p-5 shadow-xs">
+          <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4 pb-4 border-b border-zinc-100">
+            <div className="flex items-center gap-3">
+              <div className="p-2.5 rounded-xl bg-amber-50 text-amber-600 border border-amber-200/50 shrink-0">
+                <RotateCcw size={20} />
+              </div>
+              <div>
+                <h4 className="font-bold text-sm text-zinc-900 flex items-center gap-2">
+                  <span>Desfazer Quitações & Estorno em Lote</span>
+                  <span className="text-[10px] font-bold uppercase tracking-wider px-2 py-0.5 rounded-full bg-amber-100 text-amber-800">
+                    Ajuste Administrativo
+                  </span>
+                </h4>
+                <p className="text-xs text-zinc-500 mt-0.5">
+                  Selecione a equipe abaixo para reverter pagamentos quitados por engano ou estornar os adiantamentos.
+                </p>
+              </div>
+            </div>
+
+            {/* Team Selector Pills */}
+            <div className="flex flex-wrap items-center gap-1.5 p-1 bg-zinc-100 rounded-xl w-fit">
+              <button
+                type="button"
+                onClick={() => setSelectedUndoTeam('all')}
+                className={`px-3 py-1.5 text-xs font-bold rounded-lg transition-all ${
+                  selectedUndoTeam === 'all'
+                    ? 'bg-white text-zinc-900 shadow-xs'
+                    : 'text-zinc-600 hover:text-zinc-900'
+                }`}
+              >
+                🌐 Todos os Times
+              </button>
+              {teams.map(team => (
+                <button
+                  key={team.id}
+                  type="button"
+                  onClick={() => setSelectedUndoTeam(team.id)}
+                  className={`px-3 py-1.5 text-xs font-bold rounded-lg transition-all flex items-center gap-1.5 ${
+                    selectedUndoTeam === team.id
+                      ? 'bg-white text-zinc-900 shadow-xs'
+                      : 'text-zinc-600 hover:text-zinc-900'
+                  }`}
+                >
+                  <span>{team.icon || '👥'}</span>
+                  <span>{team.name}</span>
+                </button>
+              ))}
+            </div>
+          </div>
+
+          <div className="pt-4 flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+            <div className="text-xs text-zinc-600">
+              {paidAdvancesForSelectedTeam.length > 0 ? (
+                <div className="flex items-center gap-2">
+                  <span className="w-2.5 h-2.5 rounded-full bg-amber-500 animate-pulse shrink-0" />
+                  <span>
+                    Equipe <strong>{getTeamNameLabel(selectedUndoTeam)}</strong> possui{' '}
+                    <strong className="text-zinc-900 font-bold">{paidAdvancesForSelectedTeam.length} adiantamento(s) quitado(s)</strong>,
+                    totalizando <strong className="text-amber-700 font-bold">{formatCurrency(paidTotalForSelectedTeam)}</strong>.
+                  </span>
+                </div>
+              ) : (
+                <span className="text-zinc-400 italic">
+                  Nenhum adiantamento quitado encontrado para <strong>{getTeamNameLabel(selectedUndoTeam)}</strong>.
+                </span>
+              )}
+            </div>
+
+            <div className="flex flex-wrap items-center gap-2">
+              <button
+                type="button"
+                onClick={handleRevertTeamToPending}
+                disabled={processing || isRevertingTeam || paidAdvancesForSelectedTeam.length === 0}
+                className="px-4 py-2 text-xs font-bold bg-amber-600 hover:bg-amber-700 active:scale-95 text-white rounded-xl transition-all shadow-xs flex items-center gap-1.5 disabled:opacity-40 disabled:cursor-not-allowed"
+                title="Muda o status dos adiantamentos quitados de volta para Pendente e reabre as diárias"
+              >
+                {isRevertingTeam ? (
+                  <div className="h-3 w-3 animate-spin rounded-full border-2 border-white/30 border-t-white" />
+                ) : (
+                  <RotateCcw size={14} />
+                )}
+                <span>Reverter para Pendente</span>
+              </button>
+
+              <button
+                type="button"
+                onClick={handleDeleteTeamAccidentalAdvances}
+                disabled={processing || isRevertingTeam || paidAdvancesForSelectedTeam.length === 0}
+                className="px-4 py-2 text-xs font-bold bg-zinc-900 hover:bg-zinc-800 active:scale-95 text-white rounded-xl transition-all shadow-xs flex items-center gap-1.5 disabled:opacity-40 disabled:cursor-not-allowed"
+                title="Exclui os registros de adiantamento criados por engano e devolve 100% do saldo para a lista de diárias a registrar"
+              >
+                <Trash2 size={14} />
+                <span>Estornar Saldo Total</span>
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Batch Export Customization Modal */}
+      <BatchExportModal
+        isOpen={showConfigModal}
+        onClose={() => setShowConfigModal(false)}
+        rows={getItemsToExport()}
+        defaultFileName={`Lote_PIX_Adiantamentos_Pendentes_${formatDate(new Date())}`}
+        title="Configurar Lote PIX - Adiantamentos de Promotores"
+      />
     </div>
   );
 }

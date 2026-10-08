@@ -44,7 +44,7 @@ interface LeadManagerProps {
   promoters: Promoter[];
   allAttendance: Attendance[];
   readOnly?: boolean;
-  selectedTeam?: 'all' | 'flash' | 'rapidao';
+  selectedTeam?: 'all' | 'flash' | 'rapidao' | string;
 }
 
 export default function LeadManager({ 

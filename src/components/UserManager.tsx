@@ -29,12 +29,14 @@ import {
 } from 'firebase/firestore';
 import { AppUser } from '../types';
 import { AdminSecurity } from '../lib/security';
+import { useTeams, getTeamDisplay, getTeamColorStyle } from '../lib/teams';
 
 interface UserManagerProps {
   readOnly?: boolean;
 }
 
 export default function UserManager({ readOnly }: UserManagerProps) {
+  const { teams } = useTeams();
   const [users, setUsers] = useState<AppUser[]>([]);
   const [searchQuery, setSearchQuery] = useState('');
   const [isModalOpen, setIsModalOpen] = useState(false);
@@ -260,17 +262,22 @@ export default function UserManager({ readOnly }: UserManagerProps) {
                       </span>
                     </td>
                     <td className="px-5 py-4">
-                      <span className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-xl text-[10px] font-bold uppercase tracking-wide ${
-                        u.team === 'flash' 
-                          ? 'bg-indigo-50 text-indigo-700' 
-                          : u.team === 'rapidao' 
-                          ? 'bg-amber-50 text-amber-700' 
-                          : 'bg-zinc-100 text-zinc-700'
-                      }`}>
-                        {u.team === 'flash' && '⚡ Time Flash'}
-                        {u.team === 'rapidao' && '🚀 Time Rapidão'}
-                        {u.team === 'all' && '👥 Todos os Times'}
-                      </span>
+                      {u.team === 'all' ? (
+                        <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-xl text-[10px] font-bold uppercase tracking-wide bg-zinc-100 text-zinc-700">
+                          👥 Todos os Times
+                        </span>
+                      ) : (
+                        (() => {
+                          const display = getTeamDisplay(u.team, teams);
+                          const style = getTeamColorStyle(display.color);
+                          return (
+                            <span className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-xl text-[10px] font-bold uppercase tracking-wide ${style.bg} ${style.text}`}>
+                              <span>{display.icon}</span>
+                              <span>{display.name}</span>
+                            </span>
+                          );
+                        })()
+                      )}
                     </td>
                     {!readOnly && (
                       <td className="px-5 py-4 text-right">
@@ -409,9 +416,12 @@ export default function UserManager({ readOnly }: UserManagerProps) {
                       onChange={e => setFormData({ ...formData, team: e.target.value as AppUser['team'] })}
                       className="w-full px-3 py-2.5 bg-zinc-50 border border-zinc-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-indigo-500/10 focus:border-indigo-500 transition-all text-xs font-semibold text-zinc-700"
                     >
-                      <option value="all">Todos os Times</option>
-                      <option value="flash">Time Flash</option>
-                      <option value="rapidao">Time Rapidão</option>
+                      <option value="all">👥 Todos os Times</option>
+                      {teams.map(t => (
+                        <option key={t.id} value={t.id}>
+                          {t.icon || '👥'} {t.name}
+                        </option>
+                      ))}
                     </select>
                   </div>
                 </div>

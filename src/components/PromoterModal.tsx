@@ -8,16 +8,21 @@ import { X, Save, AlertCircle } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { db } from '../lib/firebase';
 import { collection, addDoc, updateDoc, doc, serverTimestamp, query, where, getDocs } from 'firebase/firestore';
-import { Promoter, OperationType } from '../types';
+import { Promoter, OperationType, Team, DEFAULT_TEAMS } from '../types';
 import { handleFirestoreError } from '../lib/utils';
+import { useTeams } from '../lib/teams';
 
 interface PromoterModalProps {
   isOpen: boolean;
   onClose: () => void;
   editingPromoter: Promoter | null;
+  teams?: Team[];
 }
 
-export default function PromoterModal({ isOpen, onClose, editingPromoter }: PromoterModalProps) {
+export default function PromoterModal({ isOpen, onClose, editingPromoter, teams: propTeams }: PromoterModalProps) {
+  const { teams: hookTeams } = useTeams();
+  const teamsList = propTeams && propTeams.length > 0 ? propTeams : (hookTeams && hookTeams.length > 0 ? hookTeams : DEFAULT_TEAMS);
+
   const [formData, setFormData] = useState({
     name: '',
     document: '',
@@ -26,7 +31,7 @@ export default function PromoterModal({ isOpen, onClose, editingPromoter }: Prom
     phoneNumber: '',
     defaultDailyRate: 100,
     active: true,
-    team: 'flash' as 'flash' | 'rapidao'
+    team: 'flash' as string
   });
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -233,11 +238,14 @@ export default function PromoterModal({ isOpen, onClose, editingPromoter }: Prom
                 <select 
                   required
                   value={formData.team}
-                  onChange={e => setFormData({...formData, team: e.target.value as 'flash' | 'rapidao'})}
+                  onChange={e => setFormData({...formData, team: e.target.value})}
                   className="w-full rounded-xl border border-zinc-200 bg-zinc-50 px-4 py-2.5 text-sm focus:border-brand-lime focus:outline-none focus:ring-4 focus:ring-brand-lime/10 transition-all font-bold"
                 >
-                  <option value="flash">⚡ Time Flash</option>
-                  <option value="rapidao">🚀 Time Rapidão</option>
+                  {teamsList.map(t => (
+                    <option key={t.id} value={t.id}>
+                      {t.icon || '👥'} {t.name}
+                    </option>
+                  ))}
                 </select>
               </div>
             </div>

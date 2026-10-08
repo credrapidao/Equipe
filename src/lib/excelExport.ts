@@ -107,6 +107,7 @@ export function exportEmployeeClosingToExcel({
   items,
   teams,
   teamName = 'Geral',
+  format = 'xlsx',
 }: {
   monthName: string;
   monthNumber: number;
@@ -114,16 +115,17 @@ export function exportEmployeeClosingToExcel({
   items: ExportClosingItem[];
   teams: Team[];
   teamName?: string;
+  format?: 'xlsx' | 'xls';
 }) {
   const wb = XLSX.utils.book_new();
 
-  // 1. ABA 1: Lote PIX (Exatamente no formato bancário: Valor | Chave | Tipo | Nome | Documento)
-  // Formato do valor: 2200.00
+  // Apenas funcionários ativos com valor a receber > 0
   const activePayableItems = items.filter(
     item => item.employee.active && (item.displayNetSalary !== undefined ? item.displayNetSalary : item.netSalary) > 0
   );
 
-  const batchHeaders = ['Valor', 'Chave', 'Tipo', 'Nome', 'Documento'];
+  // Cabeçalhos em minúsculas (valor, chave, tipo, nome, documento) para compatibilidade perfeita com leitores PHP/stdClass
+  const batchHeaders = ['valor', 'chave', 'tipo', 'nome', 'documento'];
   const batchData: string[][] = [
     batchHeaders,
     ...activePayableItems.map(item => {
@@ -140,11 +142,11 @@ export function exportEmployeeClosingToExcel({
 
   const wsBatch = XLSX.utils.aoa_to_sheet(batchData);
   wsBatch['!cols'] = [
-    { wch: 14 }, // Valor
-    { wch: 32 }, // Chave
-    { wch: 14 }, // Tipo
-    { wch: 36 }, // Nome
-    { wch: 20 }, // Documento
+    { wch: 14 }, // valor
+    { wch: 32 }, // chave
+    { wch: 14 }, // tipo
+    { wch: 36 }, // nome
+    { wch: 20 }, // documento
   ];
 
   // Forçar células como string para manter formato 2200.00 e zeros à esquerda
@@ -174,9 +176,36 @@ export function exportEmployeeClosingToExcel({
     wsBatch[cellDoc] = { t: 's', v: docStr, w: docStr };
   }
 
-  XLSX.utils.book_append_sheet(wb, wsBatch, 'Lote PIX');
+  // Apenas 1 única aba "Sheet1", sem aba secundária que quebre importadores PHP/bancários
+  XLSX.utils.book_append_sheet(wb, wsBatch, 'Sheet1');
 
-  // 2. ABA 2: Fechamento Detalhado (Para auditoria interna)
+  // Trigger File Download
+  const safeTeam = teamName.toLowerCase().replace(/[^a-z0-9]/g, '_');
+  const finalExt = format === 'xls' ? '.xls' : '.xlsx';
+  const fileName = `Lote_PIX_Fechamento_${safeTeam}_${year}_${String(monthNumber).padStart(2, '0')}${finalExt}`;
+  XLSX.writeFile(wb, fileName, { bookType: format === 'xls' ? 'biff8' : 'xlsx' });
+}
+
+/**
+ * EXPORTAÇÃO DETALHADA DE FECHAMENTO (PARA AUDITORIA INTERNA DA EMPRESA)
+ */
+export function exportEmployeeDetailedReportToExcel({
+  monthName,
+  monthNumber,
+  year,
+  items,
+  teams,
+  teamName = 'Geral',
+}: {
+  monthName: string;
+  monthNumber: number;
+  year: number;
+  items: ExportClosingItem[];
+  teams: Team[];
+  teamName?: string;
+}) {
+  const wb = XLSX.utils.book_new();
+
   const detailedHeaders = [
     'Nome do Funcionário',
     'Equipe',
@@ -268,9 +297,8 @@ export function exportEmployeeClosingToExcel({
   wsDetailed['!cols'] = getColumnWidths(detailedRows.slice(3));
   XLSX.utils.book_append_sheet(wb, wsDetailed, 'Fechamento Detalhado');
 
-  // Trigger File Download
   const safeTeam = teamName.toLowerCase().replace(/[^a-z0-9]/g, '_');
-  const fileName = `Fechamento_${safeTeam}_${year}_${String(monthNumber).padStart(2, '0')}.xlsx`;
+  const fileName = `Relatorio_Detalhado_Folha_${safeTeam}_${year}_${String(monthNumber).padStart(2, '0')}.xlsx`;
   XLSX.writeFile(wb, fileName);
 }
 
@@ -308,7 +336,7 @@ export function exportEmployeeClosingToCSV({
   });
 
   const safeTeam = teamName.toLowerCase().replace(/[^a-z0-9]/g, '_');
-  const fileName = `Fechamento_${safeTeam}_${year}_${String(monthNumber).padStart(2, '0')}.csv`;
+  const fileName = `Lote_PIX_Fechamento_${safeTeam}_${year}_${String(monthNumber).padStart(2, '0')}.csv`;
   exportBatchPaymentToCSV({
     rows,
     fileName,
@@ -318,8 +346,8 @@ export function exportEmployeeClosingToCSV({
 
 /**
  * EXPORTAÇÃO PADRONIZADA DE LOTE PIX PARA INTERNET BANKING (CORA, INTER, ITAÚ, STONE, ETC.)
- * Layout exato solicitado:
- * Colunas na linha 1: Valor | Chave | Tipo | Nome | Documento
+ * Layout exato:
+ * Colunas na linha 1: valor | chave | tipo | nome | documento
  */
 export interface BatchPaymentRow {
   valor: number;
@@ -332,141 +360,145 @@ export interface BatchPaymentRow {
   motivo?: string;
 }
 
+/**
+ * Formata cada coluna do lote PIX rigorosamente de acordo com o padrão do sistema bancário:
+ * Exemplo real fornecido:
+ * Valor: 100.50
+ * Chave: pixdehermes@gmail.com
+ * Tipo: email (minúsculo: cpf, cnpj, email, telefone, aleatoria)
+ * Nome: fortuna negocios
+ * Documento: 48194114000146 (apenas dígitos, sem pontos, barras ou traços)
+ */
+export function formatBatchColValue(
+  r: BatchPaymentRow,
+  colId: 'valor' | 'chave' | 'tipo' | 'nome' | 'documento'
+): string {
+  const rawType = String(r.tipo || 'cpf').trim().toLowerCase();
+  let normType = 'cpf';
+  if (rawType.includes('email') || rawType.includes('mail')) normType = 'email';
+  else if (rawType.includes('phone') || rawType.includes('tel') || rawType.includes('cel')) normType = 'telefone';
+  else if (rawType.includes('cnpj')) normType = 'cnpj';
+  else if (rawType.includes('rand') || rawType.includes('aleat') || rawType.includes('evp')) normType = 'aleatoria';
+  else normType = 'cpf';
+
+  switch (colId) {
+    case 'valor':
+      return Number(r.valor || 0).toFixed(2);
+    case 'chave': {
+      const key = String(r.chave || '').trim();
+      if (normType === 'email') return key.toLowerCase();
+      if (normType === 'cpf' || normType === 'cnpj' || normType === 'telefone') {
+        let digits = key.replace(/\D/g, '');
+        if (normType === 'telefone' && digits.startsWith('55') && (digits.length === 12 || digits.length === 13)) {
+          digits = digits.slice(2);
+        }
+        return digits || key;
+      }
+      return key;
+    }
+    case 'tipo':
+      return normType; // minúsculo: 'email', 'cpf', 'telefone', 'cnpj', 'aleatoria'
+    case 'nome':
+      return String(r.nome || '').trim();
+    case 'documento': {
+      // Documento estritamente números puros (ex: 48194114000146)
+      const digits = String(r.documento || '').replace(/\D/g, '');
+      return digits || String(r.documento || '').trim();
+    }
+    default:
+      return '';
+  }
+}
+
 export function exportBatchPaymentToExcel({
   rows,
   fileName,
   title = 'Lote PIX de Pagamentos Pendentes',
+  format = 'xlsx',
+  sheetName = 'Sheet1',
+  customHeaders,
+  columnOrder = ['nome', 'documento', 'chave', 'tipo', 'valor'],
 }: {
   rows: BatchPaymentRow[];
   fileName: string;
   title?: string;
+  format?: 'xlsx' | 'xls';
+  sheetName?: string;
+  customHeaders?: string[];
+  columnOrder?: Array<'valor' | 'chave' | 'tipo' | 'nome' | 'documento'>;
 }) {
   const wb = XLSX.utils.book_new();
 
-  // ABA 1: Lote PIX (Exatamente como os bancos exigem: 5 colunas diretas na linha 1)
-  // Layout exato solicitado: Valor | Chave | Tipo | Nome | Documento
-  // Exemplo: 2416.67 | 11997793975 | Telefone | Gestor de Carteira Flash | 077.246.843-59
-  //          2800.00 | cadastro.rapidao@teste.com | Email | Cadastro Rapidão | 115.111.554-18
-  const batchHeaders = ['Valor', 'Chave', 'Tipo', 'Nome', 'Documento'];
+  // Cabeçalhos oficiais correspondentes à tela do sistema bancário: RECEBEDOR | DOCUMENTO | CHAVE PIX | TIPO | VALOR
+  const batchHeaders = customHeaders && customHeaders.length === columnOrder.length 
+    ? customHeaders 
+    : ['RECEBEDOR', 'DOCUMENTO', 'CHAVE PIX', 'TIPO', 'VALOR'];
   
+  const getColValue = (r: BatchPaymentRow, colId: 'valor' | 'chave' | 'tipo' | 'nome' | 'documento') => {
+    return formatBatchColValue(r, colId);
+  };
+
   const batchData: string[][] = [
     batchHeaders,
-    ...rows.map(r => {
-      const type = normalizePixKeyType(r.tipo);
-      const valStr = Number(r.valor || 0).toFixed(2);
-      const keyStr = formatPixKey(r.chave, type);
-      const nameStr = String(r.nome || '').trim();
-      const docStr = formatDocument(r.documento);
-      return [valStr, keyStr, type, nameStr, docStr];
-    })
+    ...rows.map(r => columnOrder.map(colId => getColValue(r, colId)))
   ];
 
   const wsBatch = XLSX.utils.aoa_to_sheet(batchData);
   
   // Larguras das colunas
-  wsBatch['!cols'] = [
-    { wch: 14 }, // Valor
-    { wch: 32 }, // Chave
-    { wch: 14 }, // Tipo
-    { wch: 36 }, // Nome
-    { wch: 20 }, // Documento
-  ];
+  wsBatch['!cols'] = columnOrder.map(colId => {
+    if (colId === 'chave') return { wch: 32 };
+    if (colId === 'nome') return { wch: 36 };
+    if (colId === 'documento') return { wch: 20 };
+    return { wch: 14 };
+  });
 
-  // Garantir que todos os campos mantenham a formatação exata como texto/string
-  // impedindo remoção de zeros à esquerda (ex: 077.246.843-59) ou alteração do decimal (2800.00)
+  // Forçar células como string para manter formato 2200.00 e zeros à esquerda
   for (let r = 1; r <= rows.length; r++) {
     const row = rows[r - 1];
-    const type = normalizePixKeyType(row.tipo);
-    const valStr = Number(row.valor || 0).toFixed(2);
-    const keyStr = formatPixKey(row.chave, type);
-    const nameStr = String(row.nome || '').trim();
-    const docStr = formatDocument(row.documento);
-
-    const cellValor = XLSX.utils.encode_cell({ r, c: 0 });
-    wsBatch[cellValor] = { t: 's', v: valStr, w: valStr };
-
-    const cellChave = XLSX.utils.encode_cell({ r, c: 1 });
-    wsBatch[cellChave] = { t: 's', v: keyStr, w: keyStr };
-
-    const cellTipo = XLSX.utils.encode_cell({ r, c: 2 });
-    wsBatch[cellTipo] = { t: 's', v: type, w: type };
-
-    const cellNome = XLSX.utils.encode_cell({ r, c: 3 });
-    wsBatch[cellNome] = { t: 's', v: nameStr, w: nameStr };
-
-    const cellDoc = XLSX.utils.encode_cell({ r, c: 4 });
-    wsBatch[cellDoc] = { t: 's', v: docStr, w: docStr };
+    for (let c = 0; c < columnOrder.length; c++) {
+      const colId = columnOrder[c];
+      const valStr = getColValue(row, colId);
+      const cellRef = XLSX.utils.encode_cell({ r, c });
+      wsBatch[cellRef] = { t: 's', v: valStr, w: valStr };
+    }
   }
 
-  XLSX.utils.book_append_sheet(wb, wsBatch, 'Lote PIX');
+  // IMPORTANTE: apenas 1 única aba limpa, sem abas secundárias
+  XLSX.utils.book_append_sheet(wb, wsBatch, sheetName || 'Sheet1');
 
-  // ABA 2: Detalhamento para conferência interna (com equipes, datas e totais)
-  const totalAmount = rows.reduce((acc, r) => acc + (Number(r.valor) || 0), 0);
-  const detailHeaders = [
-    'Favorecido',
-    'Documento / CPF',
-    'Tipo Chave PIX',
-    'Chave PIX',
-    'Valor a Pagar (R$)',
-    'Data Solicitação',
-    'Equipe',
-    'Motivo / Descrição'
-  ];
-
-  const detailRows: (string | number)[][] = [
-    [title.toUpperCase()],
-    [`Gerado em: ${new Date().toLocaleDateString('pt-BR')} às ${new Date().toLocaleTimeString('pt-BR')}`],
-    [`Total de registros: ${rows.length} pendência(s) | Total a pagar: R$ ${roundCurrency(totalAmount).toFixed(2)}`],
-    [],
-    detailHeaders,
-    ...rows.map(r => {
-      const type = normalizePixKeyType(r.tipo);
-      return [
-        r.nome,
-        formatDocument(r.documento),
-        type,
-        formatPixKey(r.chave, type),
-        Number(r.valor || 0).toFixed(2),
-        formatBRDate(r.data),
-        r.equipe || '',
-        r.motivo || 'Adiantamento'
-      ];
-    }),
-    [],
-    [
-      'TOTAL GERAL A TRANSFERIR',
-      '',
-      '',
-      '',
-      Number(totalAmount).toFixed(2),
-      `${rows.length} pagamento(s)`,
-      '',
-      ''
-    ]
-  ];
-
-  const wsDetail = XLSX.utils.aoa_to_sheet(detailRows);
-  wsDetail['!cols'] = getColumnWidths(detailRows.slice(4));
-  XLSX.utils.book_append_sheet(wb, wsDetail, 'Conferência Detalhada');
-
-  XLSX.writeFile(wb, fileName);
+  const finalExt = format === 'xls' ? '.xls' : '.xlsx';
+  const cleanName = fileName.replace(/\.(xlsx|xls)$/i, '') + finalExt;
+  XLSX.writeFile(wb, cleanName, { bookType: format === 'xls' ? 'biff8' : 'xlsx' });
 }
 
 /**
  * EXPORTAÇÃO PADRONIZADA DE LOTE PIX EM FORMATO CSV (PARA BANCOS OU SISTEMAS QUE REQUEREM CSV)
- * Formato padrão: Valor, Chave, Tipo, Nome, Documento
+ * Formato padrão: RECEBEDOR, DOCUMENTO, CHAVE PIX, TIPO, VALOR
  * Suporta delimitador ',' (padrão RFC/bancos) ou ';' (padrão regional Excel Brasil)
  */
 export function exportBatchPaymentToCSV({
   rows,
   fileName,
   delimiter = ',',
+  customHeaders,
+  columnOrder = ['nome', 'documento', 'chave', 'tipo', 'valor'],
 }: {
   rows: BatchPaymentRow[];
   fileName: string;
   delimiter?: ',' | ';';
+  customHeaders?: string[];
+  columnOrder?: Array<'valor' | 'chave' | 'tipo' | 'nome' | 'documento'>;
 }) {
-  const headers = ['Valor', 'Chave', 'Tipo', 'Nome', 'Documento'];
+  const headers = customHeaders && customHeaders.length === columnOrder.length
+    ? customHeaders
+    : ['RECEBEDOR', 'DOCUMENTO', 'CHAVE PIX', 'TIPO', 'VALOR'];
+
+  const getColValue = (r: BatchPaymentRow, colId: 'valor' | 'chave' | 'tipo' | 'nome' | 'documento') => {
+    return formatBatchColValue(r, colId);
+  };
+
+
 
   const escapeCell = (val: any): string => {
     if (val === null || val === undefined) return '';
@@ -479,14 +511,7 @@ export function exportBatchPaymentToCSV({
 
   const csvLines: string[] = [
     headers.map(escapeCell).join(delimiter),
-    ...rows.map(r => {
-      const type = normalizePixKeyType(r.tipo);
-      const valStr = Number(r.valor || 0).toFixed(2);
-      const keyStr = formatPixKey(r.chave, type);
-      const nameStr = String(r.nome || '').trim();
-      const docStr = formatDocument(r.documento);
-      return [valStr, keyStr, type, nameStr, docStr].map(escapeCell).join(delimiter);
-    })
+    ...rows.map(r => columnOrder.map(colId => escapeCell(getColValue(r, colId))).join(delimiter))
   ];
 
   // \uFEFF adiciona o BOM UTF-8 para garantir abertura perfeita com acentuação no Excel e em leitores bancários
@@ -511,11 +536,13 @@ export function exportEmployeeAdvancesToExcel({
   employees,
   teams,
   title = 'Adiantamentos Pendentes de Funcionários',
+  format = 'xlsx',
 }: {
   advances: EmployeeAdvance[];
   employees: Employee[];
   teams: Team[];
   title?: string;
+  format?: 'xlsx' | 'xls';
 }) {
   const pendingAdvances = advances
     .filter(a => a.status === 'pending')
@@ -536,11 +563,13 @@ export function exportEmployeeAdvancesToExcel({
     };
   });
 
-  const fileName = `Lote_PIX_Pendentes_Funcionarios_${new Date().toISOString().split('T')[0]}.xlsx`;
+  const finalExt = format === 'xls' ? '.xls' : '.xlsx';
+  const fileName = `Lote_PIX_Pendentes_Funcionarios_${new Date().toISOString().split('T')[0]}${finalExt}`;
   exportBatchPaymentToExcel({
     rows,
     fileName,
     title,
+    format,
   });
 }
 
@@ -589,10 +618,12 @@ export function exportPromoterAdvancesToExcel({
   advances,
   promoters,
   title = 'Adiantamentos Pendentes de Promotores',
+  format = 'xlsx',
 }: {
   advances: Advance[];
   promoters: Promoter[];
   title?: string;
+  format?: 'xlsx' | 'xls';
 }) {
   const pendingAdvances = advances
     .filter(a => a.status === 'pending')
@@ -614,11 +645,13 @@ export function exportPromoterAdvancesToExcel({
     };
   });
 
-  const fileName = `Lote_PIX_Pendentes_Promotores_${new Date().toISOString().split('T')[0]}.xlsx`;
+  const finalExt = format === 'xls' ? '.xls' : '.xlsx';
+  const fileName = `Lote_PIX_Pendentes_Promotores_${new Date().toISOString().split('T')[0]}${finalExt}`;
   exportBatchPaymentToExcel({
     rows,
     fileName,
     title,
+    format,
   });
 }
 

@@ -1,10 +1,11 @@
 import React, { useState, useEffect, useMemo } from 'react';
-import { Calendar, User, Trash2, Plus, AlertCircle, Coins, Search, Wallet, Copy, Check, FileSpreadsheet, FileText, ChevronDown } from 'lucide-react';
+import { Calendar, User, Trash2, Plus, AlertCircle, Coins, Search, Wallet, Copy, Check, FileSpreadsheet, FileText, ChevronDown, Settings2 } from 'lucide-react';
 import { db } from '../lib/firebase';
 import { collection, addDoc, deleteDoc, doc, updateDoc } from 'firebase/firestore';
 import { Employee, EmployeeAdvance, OperationType, Team } from '../types';
 import { handleFirestoreError } from '../lib/utils';
-import { exportEmployeeAdvancesToExcel, exportEmployeeAdvancesToCSV } from '../lib/excelExport';
+import { exportEmployeeAdvancesToExcel, exportEmployeeAdvancesToCSV, exportBatchPaymentToExcel, exportBatchPaymentToCSV, BatchPaymentRow } from '../lib/excelExport';
+import { BatchExportModal } from './BatchExportModal';
 
 interface EmployeeAdvanceManagerProps {
   employees: Employee[];
@@ -26,6 +27,7 @@ export function EmployeeAdvanceManager({ employees, allAdvances, readOnly, teams
   const [copiedId, setCopiedId] = useState<string | null>(null);
   const [copiedPending, setCopiedPending] = useState(false);
   const [showExportMenu, setShowExportMenu] = useState(false);
+  const [showConfigModal, setShowConfigModal] = useState(false);
 
   const activeEmployees = useMemo(() => {
     return employees.filter(e => e.active);
@@ -153,28 +155,75 @@ export function EmployeeAdvanceManager({ employees, allAdvances, readOnly, teams
     return (searchQuery.trim() ? filteredAdvances : allAdvances).filter(a => a.status === 'pending').length;
   }, [filteredAdvances, allAdvances, searchQuery]);
 
-  const handleExport = (format: 'xlsx' | 'csv', delimiter: ',' | ';' = ',') => {
+  const getEmployeePixKey = (emp?: Employee) => {
+    if (!emp) return '';
+    if (emp.pixKey && emp.pixKey.trim()) return emp.pixKey.trim();
+    if (emp.pixKeyType === 'CPF' && emp.document) return emp.document.replace(/\D/g, '');
+    return emp.document ? emp.document.replace(/\D/g, '') : '';
+  };
+
+  const pendingRowsToExport: BatchPaymentRow[] = useMemo(() => {
     let pendingOnly = (searchQuery.trim() ? filteredAdvances : allAdvances).filter(a => a.status === 'pending');
     if (pendingOnly.length === 0) {
       pendingOnly = allAdvances.filter(a => a.status === 'pending');
     }
-    if (pendingOnly.length === 0) {
+    return pendingOnly.map(adv => {
+      const emp = employees.find(e => e.id === adv.employeeId);
+      return {
+        valor: Number(adv.amount || 0),
+        chave: getEmployeePixKey(emp),
+        tipo: emp?.pixKeyType || 'CPF',
+        nome: emp ? emp.name : 'Funcionário',
+        documento: emp?.document || '',
+        data: adv.date,
+        motivo: adv.notes || 'Adiantamento',
+      };
+    });
+  }, [allAdvances, filteredAdvances, searchQuery, employees]);
+
+  const handleExport = (format: 'xlsx' | 'xls' | 'csv', delimiter: ',' | ';' = ',') => {
+    if (pendingRowsToExport.length === 0) {
       alert('Nenhum adiantamento pendente para exportar.');
       return;
     }
+
+    // Check if user saved custom config
+    let customHeaders: string[] | undefined;
+    let columnOrder: Array<'valor' | 'chave' | 'tipo' | 'nome' | 'documento'> | undefined;
+    try {
+      const saved = localStorage.getItem('pix_batch_export_config_v1');
+      if (saved) {
+        const parsed = JSON.parse(saved);
+        if (parsed.columns && Array.isArray(parsed.columns)) {
+          customHeaders = parsed.columns.map((c: any) => c.headerName);
+          columnOrder = parsed.columns.map((c: any) => c.id);
+        }
+      }
+    } catch {
+      // Ignore
+    }
+
+    if (!customHeaders) {
+      customHeaders = ['Valor', 'Chave', 'Tipo', 'Nome', 'Documento'];
+    }
+
+    const todayStr = new Date().toISOString().split('T')[0];
     if (format === 'csv') {
-      exportEmployeeAdvancesToCSV({
-        advances: pendingOnly,
-        employees,
-        teams,
+      exportBatchPaymentToCSV({
+        rows: pendingRowsToExport,
+        fileName: `Lote_PIX_Pendentes_Funcionarios_${todayStr}.csv`,
         delimiter,
+        customHeaders,
+        columnOrder,
       });
     } else {
-      exportEmployeeAdvancesToExcel({
-        advances: pendingOnly,
-        employees,
-        teams,
-        title: 'Adiantamentos Pendentes de Funcionários',
+      exportBatchPaymentToExcel({
+        rows: pendingRowsToExport,
+        fileName: `Lote_PIX_Pendentes_Funcionarios_${todayStr}.${format}`,
+        title: 'Lote PIX - Adiantamentos Pendentes de Funcionários',
+        format,
+        customHeaders,
+        columnOrder,
       });
     }
   };
@@ -347,7 +396,16 @@ export function EmployeeAdvanceManager({ employees, allAdvances, readOnly, teams
                   title="Exportar adiantamentos pendentes em Excel (.xlsx)"
                 >
                   <FileSpreadsheet size={14} />
-                  <span>Excel ({pendingAdvancesCount})</span>
+                  <span>.xlsx ({pendingAdvancesCount})</span>
+                </button>
+                <button
+                  onClick={() => handleExport('xls')}
+                  disabled={pendingAdvancesCount === 0}
+                  className="flex items-center gap-1.5 px-3 py-2 text-xs font-bold text-emerald-700 hover:bg-emerald-100 disabled:opacity-50 transition-colors border-r border-emerald-200"
+                  title="Exportar adiantamentos pendentes em Excel clássico (.xls)"
+                >
+                  <FileSpreadsheet size={14} />
+                  <span>.xls</span>
                 </button>
                 <button
                   onClick={() => handleExport('csv', ',')}
@@ -356,7 +414,7 @@ export function EmployeeAdvanceManager({ employees, allAdvances, readOnly, teams
                   title="Exportar adiantamentos pendentes em CSV (.csv)"
                 >
                   <FileText size={14} />
-                  <span>CSV (.csv)</span>
+                  <span>.csv</span>
                 </button>
                 <button
                   onClick={() => setShowExportMenu(prev => !prev)}
@@ -379,7 +437,17 @@ export function EmployeeAdvanceManager({ employees, allAdvances, readOnly, teams
                     <FileSpreadsheet size={14} className="text-emerald-600 shrink-0" />
                     <div className="flex flex-col text-left">
                       <span>Planilha Excel (.xlsx)</span>
-                      <span className="text-[10px] text-zinc-400 font-normal">2 abas: Lote bancário + Conferência</span>
+                      <span className="text-[10px] text-zinc-400 font-normal">Lote PIX limpo (valor, chave, tipo, nome, documento)</span>
+                    </div>
+                  </button>
+                  <button
+                    onClick={() => { handleExport('xls'); setShowExportMenu(false); }}
+                    className="w-full px-3 py-2 text-xs font-bold text-zinc-700 hover:bg-zinc-50 flex items-center gap-2 border-t border-zinc-100"
+                  >
+                    <FileSpreadsheet size={14} className="text-teal-600 shrink-0" />
+                    <div className="flex flex-col text-left">
+                      <span>Planilha Excel Clássica (.xls)</span>
+                      <span className="text-[10px] text-zinc-400 font-normal">Formato BIFF8 (sistemas bancários legados)</span>
                     </div>
                   </button>
                   <button
@@ -400,6 +468,16 @@ export function EmployeeAdvanceManager({ employees, allAdvances, readOnly, teams
                     <div className="flex flex-col text-left">
                       <span>Arquivo CSV (.csv - Ponto e Vírgula)</span>
                       <span className="text-[10px] text-zinc-400 font-normal">Padrão Excel Brasil / Itaú</span>
+                    </div>
+                  </button>
+                  <button
+                    onClick={() => { setShowConfigModal(true); setShowExportMenu(false); }}
+                    className="w-full px-3 py-2 text-xs font-bold text-emerald-800 bg-emerald-50/50 hover:bg-emerald-100 flex items-center gap-2 border-t border-emerald-100 transition-colors"
+                  >
+                    <Settings2 size={14} className="text-emerald-700 shrink-0" />
+                    <div className="flex flex-col text-left">
+                      <span>⚙️ Configurar Layout / Prévia</span>
+                      <span className="text-[10px] text-emerald-600 font-normal">Personalizar colunas para o seu sistema</span>
                     </div>
                   </button>
                 </div>
@@ -497,6 +575,14 @@ export function EmployeeAdvanceManager({ employees, allAdvances, readOnly, teams
         </div>
       </div>
 
+      {/* Batch Export Customization Modal */}
+      <BatchExportModal
+        isOpen={showConfigModal}
+        onClose={() => setShowConfigModal(false)}
+        rows={pendingRowsToExport}
+        defaultFileName={`Lote_PIX_Pendentes_Funcionarios_${new Date().toISOString().split('T')[0]}`}
+        title="Configurar Lote PIX - Adiantamentos de Funcionários"
+      />
     </div>
   );
 }
