@@ -76,6 +76,8 @@ export interface Attendance {
   paymentStatus: 'pending' | 'paid';
   dailyRate: number;
   recordedAt: string;
+  workedHours?: number;
+  isLoaned?: boolean;
 }
 
 export interface Advance {
@@ -104,7 +106,7 @@ export interface AppUser {
   username: string;
   password?: string;
   displayName: string;
-  role: 'admin' | 'viewer';
+  role: 'admin' | 'supervisor' | 'viewer';
   team: 'all' | 'flash' | 'rapidao' | string;
   createdAt?: any;
 }

@@ -12,6 +12,7 @@ import {
   ShieldCheck, 
   UserPlus, 
   Users,
+  UserCheck,
   Lock
 } from 'lucide-react';
 import { db } from '../lib/firebase';
@@ -252,14 +253,22 @@ export default function UserManager({ readOnly }: UserManagerProps) {
                       </div>
                     </td>
                     <td className="px-5 py-4">
-                      <span className={`inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[10px] font-extrabold uppercase tracking-wider ${
-                        u.role === 'admin' 
-                          ? 'bg-emerald-50 text-emerald-700 border border-emerald-200' 
-                          : 'bg-amber-50 text-amber-700 border border-amber-200'
-                      }`}>
-                        {u.role === 'admin' ? <ShieldCheck size={10} /> : <Shield size={10} />}
-                        {u.role === 'admin' ? 'Administrador' : 'Somente Leitura'}
-                      </span>
+                      {u.role === 'admin' ? (
+                        <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[10px] font-extrabold uppercase tracking-wider bg-emerald-50 text-emerald-700 border border-emerald-200">
+                          <ShieldCheck size={10} />
+                          Administrador
+                        </span>
+                      ) : u.role === 'supervisor' ? (
+                        <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[10px] font-extrabold uppercase tracking-wider bg-blue-50 text-blue-700 border border-blue-200">
+                          <UserCheck size={10} />
+                          Supervisor
+                        </span>
+                      ) : (
+                        <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[10px] font-extrabold uppercase tracking-wider bg-amber-50 text-amber-700 border border-amber-200">
+                          <Shield size={10} />
+                          Somente Leitura
+                        </span>
+                      )}
                     </td>
                     <td className="px-5 py-4">
                       {u.team === 'all' ? (
@@ -402,14 +411,15 @@ export default function UserManager({ readOnly }: UserManagerProps) {
                       onChange={e => setFormData({ ...formData, role: e.target.value as AppUser['role'] })}
                       className="w-full px-3 py-2.5 bg-zinc-50 border border-zinc-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-indigo-500/10 focus:border-indigo-500 transition-all text-xs font-semibold text-zinc-700"
                     >
+                      <option value="supervisor">Supervisor de Equipe (Presença, Horas e Empréstimo)</option>
+                      <option value="admin">Administrador (Acesso Total)</option>
                       <option value="viewer">Somente Leitura</option>
-                      <option value="admin">Administrador</option>
                     </select>
                   </div>
 
                   <div>
                     <label className="block text-[10px] font-extrabold text-zinc-400 uppercase tracking-wider mb-1">
-                      Acesso a Time
+                      Equipe Atribuída
                     </label>
                     <select
                       value={formData.team}
@@ -425,6 +435,24 @@ export default function UserManager({ readOnly }: UserManagerProps) {
                     </select>
                   </div>
                 </div>
+
+                {formData.role === 'supervisor' && (
+                  <div className="p-3 bg-blue-50 border border-blue-200 rounded-2xl text-[11px] text-blue-800 space-y-1">
+                    <p className="font-bold flex items-center gap-1.5 text-blue-900">
+                      <UserCheck size={14} className="text-blue-600" />
+                      Regras de Acesso do Supervisor:
+                    </p>
+                    <p>
+                      • O supervisor vê apenas os promotores da sua equipe atribuída.
+                    </p>
+                    <p>
+                      • Tem permissão para marcar <strong>Presença</strong> (Presente, Meio Período, Falta), digitar a quantidade de <strong>Horas Trabalhadas</strong> e sinalizar se o promotor foi <strong>Emprestado</strong> (checkbox).
+                    </p>
+                    <p>
+                      • Os dados financeiros (diárias, adiantamentos, salários e relatórios bancários) ficam protegidos e ocultos para ele.
+                    </p>
+                  </div>
+                )}
 
                 {/* Actions */}
                 <div className="flex items-center justify-end gap-3 border-t border-zinc-100 pt-4 mt-6">

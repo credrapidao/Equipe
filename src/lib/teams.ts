@@ -123,21 +123,14 @@ export function getTeamDisplay(teamId: string | undefined, teamsList: Team[]) {
   };
 }
 
-// Hook to subscribe to teams in Firestore with default fallback
+// Hook to subscribe to teams in Firestore with default fallback and auto-discovery
 export function useTeams() {
   const [teams, setTeams] = useState<Team[]>(DEFAULT_TEAMS);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
     const teamsCol = collection(db, 'teams');
-    const unsubscribe = onSnapshot(teamsCol, (snapshot) => {
-      if (snapshot.empty) {
-        // Empty in Firestore, use default teams
-        setTeams(DEFAULT_TEAMS);
-        setLoading(false);
-        return;
-      }
-
+    const unsubTeams = onSnapshot(teamsCol, (snapshot) => {
       const list: Team[] = snapshot.docs.map(d => ({
         id: d.id,
         ...d.data()
@@ -152,12 +145,16 @@ export function useTeams() {
         merged.unshift(DEFAULT_TEAMS[0]);
       }
       if (!hasRapidao) {
-        // insert rapidao right after flash or at index 1
         const flashIdx = merged.findIndex(t => t.id === 'flash');
         merged.splice(flashIdx + 1, 0, DEFAULT_TEAMS[1]);
       }
 
-      setTeams(merged);
+      setTeams(prev => {
+        // preserve any auto-discovered teams that aren't yet in firestore
+        const customIds = new Set(merged.map(m => m.id));
+        const extra = prev.filter(p => !customIds.has(p.id) && p.id !== 'both');
+        return [...merged, ...extra];
+      });
       setLoading(false);
     }, (err) => {
       console.error('Erro ao escutar equipes:', err);
@@ -165,7 +162,55 @@ export function useTeams() {
       setLoading(false);
     });
 
-    return () => unsubscribe();
+    // Auto-discover teams referenced in employees and promoters (e.g. "start")
+    const unsubEmployees = onSnapshot(collection(db, 'employees'), (snapshot) => {
+      snapshot.docs.forEach(d => {
+        const data = d.data();
+        const teamId = data.team;
+        if (teamId && teamId !== 'flash' && teamId !== 'rapidao' && teamId !== 'both') {
+          // If not in teams, persist to Firestore teams collection
+          const teamSlug = String(teamId).trim().toLowerCase();
+          const cleanName = data.teamName || (teamSlug.charAt(0).toUpperCase() + teamSlug.slice(1));
+          const displayName = cleanName.toLowerCase().startsWith('time ') ? cleanName : `Time ${cleanName}`;
+          
+          setDoc(doc(db, 'teams', teamSlug), {
+            id: teamSlug,
+            name: displayName,
+            icon: '🚀',
+            color: 'emerald',
+            isDefault: false,
+            createdAt: new Date().toISOString()
+          }, { merge: true }).catch(() => {});
+        }
+      });
+    }, () => {});
+
+    const unsubPromoters = onSnapshot(collection(db, 'promoters'), (snapshot) => {
+      snapshot.docs.forEach(d => {
+        const data = d.data();
+        const teamId = data.team;
+        if (teamId && teamId !== 'flash' && teamId !== 'rapidao' && teamId !== 'both') {
+          const teamSlug = String(teamId).trim().toLowerCase();
+          const cleanName = teamSlug.charAt(0).toUpperCase() + teamSlug.slice(1);
+          const displayName = cleanName.toLowerCase().startsWith('time ') ? cleanName : `Time ${cleanName}`;
+          
+          setDoc(doc(db, 'teams', teamSlug), {
+            id: teamSlug,
+            name: displayName,
+            icon: '🚀',
+            color: 'emerald',
+            isDefault: false,
+            createdAt: new Date().toISOString()
+          }, { merge: true }).catch(() => {});
+        }
+      });
+    }, () => {});
+
+    return () => {
+      unsubTeams();
+      unsubEmployees();
+      unsubPromoters();
+    };
   }, []);
 
   return { teams, loading };
