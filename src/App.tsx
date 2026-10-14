@@ -483,37 +483,6 @@ export default function App() {
     }
   };
 
-  const handleQuickLogin = async (role: 'admin' | 'supervisor' | 'viewer', demoTeam: string = 'flash') => {
-    setLoginError('');
-    setIsAuthenticating(true);
-    try {
-      if (role === 'admin') {
-        const adminUser = { uid: 'admin-local', displayName: 'Administrador (Demo)', email: 'admin@rapidao.com', team: 'all' };
-        localStorage.setItem('rapidaocred_session', JSON.stringify({ user: adminUser, role: 'admin' }));
-        setUser(adminUser);
-        setUserRole('admin');
-        setActiveTab('dashboard');
-      } else if (role === 'supervisor') {
-        const supervisorUser = { uid: 'supervisor-local', displayName: 'Supervisor de Promotores', email: 'supervisor@rapidao.com', team: demoTeam };
-        localStorage.setItem('rapidaocred_session', JSON.stringify({ user: supervisorUser, role: 'supervisor' }));
-        setUser(supervisorUser);
-        setUserRole('supervisor');
-        setSelectedTeam(demoTeam);
-        setActiveTab('attendance');
-      } else {
-        const viewerUser = { uid: 'viewer-local', displayName: 'Visualizador (Demo)', email: 'view@rapidao.com', team: 'all' };
-        localStorage.setItem('rapidaocred_session', JSON.stringify({ user: viewerUser, role: 'viewer' }));
-        setUser(viewerUser);
-        setUserRole('viewer');
-        setActiveTab('dashboard');
-      }
-    } catch (err) {
-      console.error('Quick login error:', err);
-      setLoginError('Erro ao realizar o login rápido.');
-    } finally {
-      setIsAuthenticating(false);
-    }
-  };
 
   const handleTogglePromoterStatus = async (promoter: Promoter) => {
     if (userRole === 'viewer') return;
@@ -600,7 +569,7 @@ export default function App() {
 
           <div className="relative flex py-1 items-center">
             <div className="flex-grow border-t border-zinc-200"></div>
-            <span className="flex-shrink mx-4 text-[10px] font-bold uppercase tracking-widest text-zinc-400">Ou autenticação direta</span>
+            <span className="flex-shrink mx-4 text-[10px] font-bold uppercase tracking-widest text-zinc-400">Ou autenticação Google</span>
             <div className="flex-grow border-t border-zinc-200"></div>
           </div>
 
@@ -609,37 +578,8 @@ export default function App() {
             className="flex w-full items-center justify-center gap-3 rounded-xl border border-zinc-200 bg-white px-4 py-2.5 text-xs font-bold text-zinc-700 transition-all hover:bg-zinc-50 active:scale-[0.98]"
           >
             <img src="https://www.google.com/favicon.ico" alt="Google" className="h-4 w-4" />
-            Entrar com Google (Admin)
+            Entrar com Google
           </button>
-
-          <div className="pt-3 border-t border-zinc-100 space-y-2">
-            <span className="block text-[10px] font-extrabold uppercase tracking-widest text-zinc-400 text-center">
-              Testar Acessos com 1 Clique
-            </span>
-            <div className="grid grid-cols-2 gap-2">
-              <button
-                type="button"
-                onClick={() => handleQuickLogin('supervisor', 'flash')}
-                className="flex items-center justify-center gap-1.5 px-3 py-2 bg-blue-50 hover:bg-blue-100 text-blue-700 rounded-xl text-xs font-bold transition-all border border-blue-200 shadow-2xs active:scale-95 text-center"
-                title="Acessar como Supervisor da Equipe Flash (marcar presença, horas e empréstimo)"
-              >
-                <span>👤</span>
-                <span>Supervisor (Demo)</span>
-              </button>
-              <button
-                type="button"
-                onClick={() => handleQuickLogin('admin')}
-                className="flex items-center justify-center gap-1.5 px-3 py-2 bg-emerald-50 hover:bg-emerald-100 text-emerald-800 rounded-xl text-xs font-bold transition-all border border-emerald-200 shadow-2xs active:scale-95 text-center"
-                title="Acessar como Administrador do sistema"
-              >
-                <span>🛡️</span>
-                <span>Admin (Demo)</span>
-              </button>
-            </div>
-            <p className="text-[10px] text-zinc-400 text-center font-mono">
-              Usuários: <span className="font-bold text-zinc-600">supervisor / super123</span> • <span className="font-bold text-zinc-600">admin / Rapidao123</span>
-            </p>
-          </div>
         </div>
       </div>
     );
@@ -666,20 +606,27 @@ export default function App() {
             label="Presença" 
             onClick={() => setActiveTab('attendance')} 
           />
-          <NavItem 
-            active={activeTab === 'promoters'} 
-            icon={<Users size={20} />} 
-            label={userRole === 'supervisor' ? "Minha Equipe" : "Equipe"} 
-            onClick={() => setActiveTab('promoters')} 
-          />
-          <NavItem 
-            active={activeTab === 'leads'} 
-            icon={<Target size={20} />} 
-            label="Leads" 
-            onClick={() => setActiveTab('leads')} 
-          />
-          {userRole !== 'supervisor' && (
+          {userRole === 'supervisor' ? (
+            <NavItem 
+              active={activeTab === 'promoters'} 
+              icon={<Users size={20} />} 
+              label="Minha Equipe" 
+              onClick={() => setActiveTab('promoters')} 
+            />
+          ) : (
             <>
+              <NavItem 
+                active={activeTab === 'promoters'} 
+                icon={<Users size={20} />} 
+                label="Equipe" 
+                onClick={() => setActiveTab('promoters')} 
+              />
+              <NavItem 
+                active={activeTab === 'leads'} 
+                icon={<Target size={20} />} 
+                label="Leads" 
+                onClick={() => setActiveTab('leads')} 
+              />
               <NavItem 
                 active={activeTab === 'dashboard'} 
                 icon={<LayoutDashboard size={20} />} 
@@ -771,14 +718,18 @@ export default function App() {
               <button onClick={() => { setActiveTab('attendance'); setIsMobileMenuOpen(false); }} className={`flex w-full items-center gap-4 text-xl font-medium ${activeTab === 'attendance' ? 'text-zinc-900 font-bold' : 'text-zinc-400'}`}>
                 <CalendarDays size={24} /> Presença
               </button>
-              <button onClick={() => { setActiveTab('promoters'); setIsMobileMenuOpen(false); }} className={`flex w-full items-center gap-4 text-xl font-medium ${activeTab === 'promoters' ? 'text-zinc-900 font-bold' : 'text-zinc-400'}`}>
-                <Users size={24} /> {userRole === 'supervisor' ? 'Minha Equipe' : 'Equipe'}
-              </button>
-              <button onClick={() => { setActiveTab('leads'); setIsMobileMenuOpen(false); }} className={`flex w-full items-center gap-4 text-xl font-medium ${activeTab === 'leads' ? 'text-zinc-900 font-bold' : 'text-zinc-400'}`}>
-                <Target size={24} /> Leads
-              </button>
-              {userRole !== 'supervisor' && (
+              {userRole === 'supervisor' ? (
+                <button onClick={() => { setActiveTab('promoters'); setIsMobileMenuOpen(false); }} className={`flex w-full items-center gap-4 text-xl font-medium ${activeTab === 'promoters' ? 'text-zinc-900 font-bold' : 'text-zinc-400'}`}>
+                  <Users size={24} /> Minha Equipe
+                </button>
+              ) : (
                 <>
+                  <button onClick={() => { setActiveTab('promoters'); setIsMobileMenuOpen(false); }} className={`flex w-full items-center gap-4 text-xl font-medium ${activeTab === 'promoters' ? 'text-zinc-900 font-bold' : 'text-zinc-400'}`}>
+                    <Users size={24} /> Equipe
+                  </button>
+                  <button onClick={() => { setActiveTab('leads'); setIsMobileMenuOpen(false); }} className={`flex w-full items-center gap-4 text-xl font-medium ${activeTab === 'leads' ? 'text-zinc-900 font-bold' : 'text-zinc-400'}`}>
+                    <Target size={24} /> Leads
+                  </button>
                   <button onClick={() => { setActiveTab('dashboard'); setIsMobileMenuOpen(false); }} className={`flex w-full items-center gap-4 text-xl font-medium ${activeTab === 'dashboard' ? 'text-zinc-900 font-bold' : 'text-zinc-400'}`}>
                     <LayoutDashboard size={24} /> Dashboard
                   </button>
@@ -998,7 +949,7 @@ export default function App() {
                         <span className="text-xs font-bold text-zinc-500 uppercase tracking-tight">Ver Inativos</span>
                       </div>
 
-                      {userRole !== 'viewer' && (
+                      {userRole === 'admin' ? (
                         <div className="flex items-center gap-2 flex-wrap">
                           <button 
                             onClick={() => setIsTeamModalOpen(true)}
@@ -1016,7 +967,11 @@ export default function App() {
                             <span>Adicionar Promotor</span>
                           </button>
                         </div>
-                      )}
+                      ) : userRole === 'supervisor' ? (
+                        <span className="text-[11px] font-bold text-blue-700 bg-blue-50 px-3 py-1.5 rounded-xl border border-blue-200">
+                          Membros da Equipe • Cadastro gerenciado pela Administração
+                        </span>
+                      ) : null}
                     </div>
                   </div>
                   <div className="grid grid-cols-1 md:grid-cols-2 gap-4">

@@ -70,7 +70,7 @@ export default function AttendanceTracker({
     const attendanceId = existing?.id || selectedDate;
     const docRef = doc(db, `promoters/${promoterId}/attendance`, attendanceId);
 
-    const defaultHours = status === 'present' ? 8 : (status === 'half-day' ? 4 : 0);
+    const defaultHours = status === 'present' ? 5 : (status === 'half-day' ? 2.5 : 0);
 
     try {
       if (existing && existing.status === status) {
@@ -114,14 +114,14 @@ export default function AttendanceTracker({
       if (existing) {
         await updateDoc(docRef, { isLoaned });
       } else {
-        // Se ainda não tinha presença registrada, cria marcando presença com 8h e emprestado
+        // Se ainda não tinha presença registrada, cria marcando presença com 5h padrão e emprestado
         await setDoc(docRef, {
           promoterId,
           date: selectedDate,
           status: 'present',
           paymentStatus: 'pending',
           dailyRate: defaultRate,
-          workedHours: 8,
+          workedHours: 5,
           isLoaned,
           recordedAt: new Date().toISOString()
         });
@@ -147,7 +147,7 @@ export default function AttendanceTracker({
         await setDoc(docRef, {
           promoterId,
           date: selectedDate,
-          status: cleanHours >= 6 ? 'present' : (cleanHours > 0 ? 'half-day' : 'absent'),
+          status: cleanHours >= 5 ? 'present' : (cleanHours > 0 ? 'half-day' : 'absent'),
           paymentStatus: 'pending',
           dailyRate: defaultRate,
           workedHours: cleanHours,
@@ -197,7 +197,7 @@ export default function AttendanceTracker({
         if (att.status === 'present') present++;
         if (att.status === 'half-day') halfDay++;
         if (att.status === 'absent') absent++;
-        const h = att.workedHours !== undefined ? att.workedHours : (att.status === 'present' ? 8 : (att.status === 'half-day' ? 4 : 0));
+        const h = att.workedHours !== undefined ? att.workedHours : (att.status === 'present' ? 5 : (att.status === 'half-day' ? 2.5 : 0));
         totalHours += h;
         if (att.isLoaned) loaned++;
       }
@@ -334,7 +334,7 @@ export default function AttendanceTracker({
           <div className="flex items-center gap-2">
             <span className="text-base">📋</span>
             <span>
-              <strong>Painel do Supervisor:</strong> Marque a <strong>Presença</strong>, confira ou ajuste as <strong>Horas Trabalhadas</strong> e, se o promotor foi emprestado, marque a caixinha <strong>Emprestado?</strong>.
+              <strong>Painel do Supervisor:</strong> Marque a <strong>Presença</strong> (padrão de 5h), confira ou ajuste as <strong>Horas Trabalhadas</strong> e, se o promotor foi emprestado, marque a caixinha <strong>Emprestado?</strong>.
             </span>
           </div>
           <span className="text-[11px] font-bold text-blue-700 bg-white px-2 py-0.5 rounded-full border border-blue-200 shrink-0 shadow-2xs">
@@ -369,7 +369,7 @@ export default function AttendanceTracker({
               const currentHours = attendance 
                 ? (attendance.workedHours !== undefined 
                     ? attendance.workedHours 
-                    : (attendance.status === 'present' ? 8 : (attendance.status === 'half-day' ? 4 : 0)))
+                    : (attendance.status === 'present' ? 5 : (attendance.status === 'half-day' ? 2.5 : 0)))
                 : '';
 
               return (
@@ -408,7 +408,7 @@ export default function AttendanceTracker({
                         active={attendance?.status === 'present'} 
                         icon={<Check size={15} />} 
                         activeColor="green"
-                        title="Presente (8 horas padrão)"
+                        title="Presente (5 horas padrão)"
                         onClick={() => toggleStatus(promoter.id, 'present')} 
                         disabled={readOnly}
                       />
@@ -416,7 +416,7 @@ export default function AttendanceTracker({
                         active={attendance?.status === 'half-day'} 
                         icon={<Clock size={15} />} 
                         activeColor="yellow"
-                        title="Meio Período (4 horas padrão)"
+                        title="Meio Período (2,5 horas padrão)"
                         onClick={() => toggleStatus(promoter.id, 'half-day')} 
                         disabled={readOnly}
                       />
@@ -441,10 +441,10 @@ export default function AttendanceTracker({
                         step="0.5"
                         disabled={readOnly}
                         value={currentHours}
-                        placeholder={attendance ? '8' : '0'}
+                        placeholder={attendance ? '5' : '0'}
                         onChange={(e) => updateWorkedHours(promoter.id, Number(e.target.value))}
                         className="w-16 bg-zinc-50 border border-zinc-200 hover:border-zinc-300 focus:border-indigo-500 focus:bg-white rounded-xl px-2 py-1.5 text-xs font-bold text-zinc-900 text-center focus:outline-none transition-all disabled:opacity-50"
-                        title="Digite a quantidade de horas trabalhadas no dia"
+                        title="Digite a quantidade de horas trabalhadas no dia (padrão 5h)"
                       />
                       <span className="text-xs font-bold text-zinc-400">h</span>
                     </div>
