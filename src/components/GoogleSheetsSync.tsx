@@ -121,8 +121,10 @@ export default function GoogleSheetsSync({
 
       const totalDiarias = promoterAttendance.reduce((sum, a) => {
         if (a.status === 'absent') return sum;
-        const rate = a.dailyRate || p.defaultDailyRate || 100;
-        return sum + (a.status === 'half-day' ? rate / 2 : rate);
+        const val = a.dailyRate !== undefined 
+          ? a.dailyRate 
+          : (a.workedHours !== undefined ? a.workedHours * 20 : (a.status === 'half-day' ? 50 : (p.defaultDailyRate || 100)));
+        return sum + val;
       }, 0);
 
       const totalAdiantamentos = promoterAdvances
@@ -163,8 +165,11 @@ export default function GoogleSheetsSync({
       const statusText = a.status === 'present' ? 'Presente' : a.status === 'half-day' ? 'Meio-período' : 'Ausente';
       const paymentStatusText = a.paymentStatus === 'paid' ? 'Pago' : 'Pendente';
       const promoterName = promoter ? promoter.name : 'Promotor Excluído';
-      const rate = a.dailyRate || promoter?.defaultDailyRate || 100;
-      const value = a.status === 'absent' ? 0 : a.status === 'half-day' ? rate / 2 : rate;
+      const value = a.status === 'absent' 
+        ? 0 
+        : (a.dailyRate !== undefined 
+            ? a.dailyRate 
+            : (a.workedHours !== undefined ? a.workedHours * 20 : (a.status === 'half-day' ? 50 : (promoter?.defaultDailyRate || 100))));
 
       return [
         formatToBrazilianDate(a.date),

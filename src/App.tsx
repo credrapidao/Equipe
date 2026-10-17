@@ -235,8 +235,10 @@ export default function App() {
     const unpaidAttendance = filteredAttendance.filter(a => a.paymentStatus === 'pending');
     const totalUnpaidAmount = unpaidAttendance.reduce((sum, a) => {
       if (a.status === 'absent') return sum;
-      const rate = a.dailyRate || 100;
-      return sum + (a.status === 'half-day' ? rate / 2 : rate);
+      const rate = a.dailyRate !== undefined 
+        ? a.dailyRate 
+        : (a.workedHours !== undefined ? a.workedHours * 20 : (a.status === 'half-day' ? 50 : 100));
+      return sum + rate;
     }, 0);
 
     const pendingAdvances = filteredAdvances.filter(a => a.status === 'pending');
@@ -883,12 +885,13 @@ export default function App() {
                     label="Pendente Pagamento" 
                     value={formatCurrency(financialSummary.unpaidAmount)} 
                     icon={<Clock className="text-amber-600" />} 
-                    subtext={`${financialSummary.unpaidDays} dias não pagos`}
+                    subtext={`${financialSummary.unpaidDays} presenças a pagar`}
                   />
                   <StatCard 
-                    label="Adiantamentos" 
+                    label="Adiantamento Pendente" 
                     value={formatCurrency(financialSummary.pendingAdvances)} 
                     icon={<Wallet className="text-red-600" />} 
+                    subtext="Adiantamentos em aberto"
                   />
                   <StatCard 
                     label="Saldo Líquido" 

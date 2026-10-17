@@ -4,7 +4,7 @@
  */
 
 import React, { useState, useEffect } from 'react';
-import { Wallet, Plus, Trash2, CheckCircle2, Clock, DollarSign, Copy, Check, PlusCircle, XCircle, Search, FileSpreadsheet, FileText, ChevronDown, Settings2, RotateCcw, Undo2, AlertTriangle } from 'lucide-react';
+import { Wallet, Plus, Trash2, CheckCircle2, Clock, DollarSign, Copy, Check, PlusCircle, XCircle, Search, FileSpreadsheet, FileText, ChevronDown, Settings2, RotateCcw, Undo2, AlertTriangle, Edit3, RefreshCw } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { db } from '../lib/firebase';
 import { collection, query, onSnapshot, addDoc, updateDoc, doc, deleteDoc, serverTimestamp, orderBy, where, limit, getDocs, writeBatch } from 'firebase/firestore';
@@ -39,6 +39,8 @@ export default function AdvanceManager({ promoters, readOnly }: AdvanceManagerPr
   const [showExportMenu, setShowExportMenu] = useState(false);
   const [showHistoryExportMenu, setShowHistoryExportMenu] = useState(false);
   const [showConfigModal, setShowConfigModal] = useState(false);
+  const [editingAdvance, setEditingAdvance] = useState<Advance | null>(null);
+  const [editAmount, setEditAmount] = useState<string>('');
 
   // 1. DATA FLATTENING
   const advances: Advance[] = React.useMemo(() => {
@@ -51,6 +53,14 @@ export default function AdvanceManager({ promoters, readOnly }: AdvanceManagerPr
   }, [advancesMap, searchTerm]);
 
   // 2. LOGIC HELPERS
+  const getAttendanceRecordValue = (att: { status?: string; dailyRate?: number; workedHours?: number }) => {
+    if (att.status === 'absent') return 0;
+    if (att.dailyRate !== undefined) return att.dailyRate;
+    if (att.workedHours !== undefined) return att.workedHours * 20;
+    if (att.status === 'half-day') return 50;
+    return 100;
+  };
+
   const getPendingBalance = (promoterId: string) => {
     const totalAttendance = weeklyPending[promoterId] || 0;
     const paidAttendance = weeklyPaidAtt[promoterId] || 0;
@@ -130,8 +140,7 @@ export default function AdvanceManager({ promoters, readOnly }: AdvanceManagerPr
         snapshot.docs.forEach(doc => {
           const data = doc.data();
           if (data.status === 'absent') return;
-          const rate = data.dailyRate || 100;
-          const val = data.status === 'half-day' ? rate / 2 : rate;
+          const val = getAttendanceRecordValue(data);
 
           if (data.paymentStatus === 'paid') {
             paidTotal += val;
@@ -194,8 +203,7 @@ export default function AdvanceManager({ promoters, readOnly }: AdvanceManagerPr
         for (const att of attendanceDocs) {
           if (remainingToCover <= 0.01) break;
           if (att.paymentStatus !== 'paid') {
-            const rate = att.dailyRate || 100;
-            const value = att.status === 'half-day' ? rate / 2 : (att.status === 'absent' ? 0 : rate);
+            const value = getAttendanceRecordValue(att);
             
             batch.update(doc(db, 'promoters', advance.promoterId, 'attendance', att.id), { 
               paymentStatus: 'paid',
@@ -212,8 +220,7 @@ export default function AdvanceManager({ promoters, readOnly }: AdvanceManagerPr
         let amountToRevert = advance.amount;
         for (const att of paidDocs) {
           if (amountToRevert <= 0.01) break;
-          const rate = att.dailyRate || 100;
-          const value = att.status === 'half-day' ? rate / 2 : (att.status === 'absent' ? 0 : rate);
+          const value = getAttendanceRecordValue(att);
           batch.update(doc(db, 'promoters', advance.promoterId, 'attendance', att.id), { 
             paymentStatus: 'pending',
             updatedAt: serverTimestamp()
@@ -242,6 +249,70 @@ export default function AdvanceManager({ promoters, readOnly }: AdvanceManagerPr
     }
   };
 
+  const handleSaveEditedAdvance = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!editingAdvance || processing) return;
+    const parsed = parseFloat(editAmount.replace(',', '.'));
+    if (isNaN(parsed) || parsed <= 0) {
+      alert('Por favor, digite um valor válido maior que zero.');
+      return;
+    }
+
+    setProcessing(true);
+    try {
+      await updateDoc(doc(db, 'promoters', editingAdvance.promoterId, 'advances', editingAdvance.id), {
+        amount: Math.round(parsed * 100) / 100,
+        updatedAt: serverTimestamp()
+      });
+      setEditingAdvance(null);
+      setEditAmount('');
+      alert('Valor do adiantamento pendente atualizado com sucesso!');
+    } catch (err) {
+      console.error('Erro ao atualizar adiantamento:', err);
+      handleFirestoreError(err, OperationType.UPDATE, `promoters/${editingAdvance.promoterId}/advances/${editingAdvance.id}`);
+    } finally {
+      setProcessing(false);
+    }
+  };
+
+  const handleSyncPendingAdvancesWithAttendance = async () => {
+    if (processing) return;
+    const pendingAdvances = advances.filter(a => a.status === 'pending');
+    if (pendingAdvances.length === 0) {
+      alert('Nenhum adiantamento pendente registrado para atualizar.');
+      return;
+    }
+
+    setProcessing(true);
+    try {
+      const batch = writeBatch(db);
+      let count = 0;
+
+      for (const adv of pendingAdvances) {
+        const attPending = weeklyPending[adv.promoterId] || 0;
+        if (attPending > 0 && Math.abs(adv.amount - attPending) > 0.01) {
+          batch.update(doc(db, 'promoters', adv.promoterId, 'advances', adv.id), {
+            amount: attPending,
+            updatedAt: serverTimestamp()
+          });
+          count++;
+        }
+      }
+
+      if (count > 0) {
+        await batch.commit();
+        alert(`Sucesso! ${count} adiantamento(s) pendente(s) foram atualizados com os valores calculados das presenças/horas trabalhadas!`);
+      } else {
+        alert('Os valores dos adiantamentos pendentes já estão atualizados de acordo com as presenças e horas trabalhadas.');
+      }
+    } catch (err) {
+      console.error('Erro ao sincronizar adiantamentos pendentes:', err);
+      alert('Erro ao atualizar adiantamentos pendentes: ' + (err instanceof Error ? err.message : String(err)));
+    } finally {
+      setProcessing(false);
+    }
+  };
+
   const deleteAdvance = async (advance: Advance) => {
     if (!confirm('Tem certeza que deseja excluir este adiantamento?')) return;
     setProcessing(true);
@@ -259,8 +330,7 @@ export default function AdvanceManager({ promoters, readOnly }: AdvanceManagerPr
         for (const att of paidDocs) {
           if (amountToRevert <= 0.01) break;
           
-          const rate = att.dailyRate || 100;
-          const value = att.status === 'half-day' ? rate / 2 : (att.status === 'absent' ? 0 : rate);
+          const value = getAttendanceRecordValue(att);
           
           batch.update(doc(db, 'promoters', advance.promoterId, 'attendance', att.id), { 
             paymentStatus: 'pending',
@@ -872,8 +942,7 @@ export default function AdvanceManager({ promoters, readOnly }: AdvanceManagerPr
         let amountToRevert = advance.amount;
         for (const att of paidDocs) {
           if (amountToRevert <= 0.01) break;
-          const rate = att.dailyRate || 100;
-          const value = att.status === 'half-day' ? rate / 2 : (att.status === 'absent' ? 0 : rate);
+          const value = getAttendanceRecordValue(att);
           batch.update(doc(db, 'promoters', advance.promoterId, 'attendance', att.id), { 
             paymentStatus: 'pending',
             updatedAt: serverTimestamp()
@@ -921,8 +990,7 @@ export default function AdvanceManager({ promoters, readOnly }: AdvanceManagerPr
         let amountToRevert = advance.amount;
         for (const att of paidDocs) {
           if (amountToRevert <= 0.01) break;
-          const rate = att.dailyRate || 100;
-          const value = att.status === 'half-day' ? rate / 2 : (att.status === 'absent' ? 0 : rate);
+          const value = getAttendanceRecordValue(att);
           batch.update(doc(db, 'promoters', advance.promoterId, 'attendance', att.id), { 
             paymentStatus: 'pending',
             updatedAt: serverTimestamp()
@@ -949,8 +1017,8 @@ export default function AdvanceManager({ promoters, readOnly }: AdvanceManagerPr
       {/* 1. DASHBOARD HUB */}
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
         {[
-          { label: 'Pend. Registro', value: totalsSummary.pendingReg, color: 'text-red-600', bg: 'bg-red-50', icon: <Clock size={20} /> },
-          { label: 'Registrados', value: totalsSummary.registered, color: 'text-amber-600', bg: 'bg-amber-50', icon: <CheckCircle2 size={20} /> },
+          { label: 'Saldos a Registrar', value: totalsSummary.pendingReg, color: 'text-red-600', bg: 'bg-red-50', icon: <Clock size={20} /> },
+          { label: 'Adiantamento Pendente', value: totalsSummary.registered, color: 'text-amber-600', bg: 'bg-amber-50', icon: <CheckCircle2 size={20} /> },
           { label: 'Quitados', value: totalsSummary.paid, color: 'text-brand-lime', bg: 'bg-brand-dark', icon: <DollarSign size={20} /> },
           { label: 'Esta Semana', value: totalsSummary.weekTotal, color: 'text-indigo-600', bg: 'bg-indigo-50', icon: <Wallet size={20} /> },
         ].map((stat, i) => (
@@ -1028,7 +1096,14 @@ export default function AdvanceManager({ promoters, readOnly }: AdvanceManagerPr
                   <select 
                     required
                     value={selectedPromoterId}
-                    onChange={e => setSelectedPromoterId(e.target.value)}
+                    onChange={e => {
+                      const pId = e.target.value;
+                      setSelectedPromoterId(pId);
+                      const pending = getPendingBalance(pId);
+                      if (pending > 0 && !amount) {
+                        setAmount(String(pending));
+                      }
+                    }}
                     className="w-full rounded-xl border border-zinc-200 bg-zinc-50 px-4 py-2.5 text-sm focus:border-brand-lime focus:outline-none focus:ring-4 focus:ring-brand-lime/10 transition-all font-bold"
                   >
                     <option value="">Selecionar...</option>
@@ -1038,7 +1113,45 @@ export default function AdvanceManager({ promoters, readOnly }: AdvanceManagerPr
                   </select>
                 </div>
                 <div className="space-y-1.5">
-                  <label className="text-xs font-bold uppercase tracking-wider text-zinc-500">Valor (R$)</label>
+                  <div className="flex items-center justify-between">
+                    <label className="text-xs font-bold uppercase tracking-wider text-zinc-500">Valor (R$)</label>
+                    <div className="flex items-center gap-1">
+                      <button
+                        type="button"
+                        onClick={() => setAmount('10')}
+                        className="px-1.5 py-0.5 rounded text-[10px] font-extrabold bg-amber-50 hover:bg-amber-100 text-amber-800 border border-amber-200"
+                        title="Metade de 1 hora = R$ 10,00"
+                      >
+                        ½h (R$ 10)
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setAmount('50')}
+                        className="px-1.5 py-0.5 rounded text-[10px] font-extrabold bg-zinc-100 hover:bg-zinc-200 text-zinc-700 border border-zinc-200"
+                        title="Meio período = R$ 50,00"
+                      >
+                        2,5h (R$ 50)
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setAmount('100')}
+                        className="px-1.5 py-0.5 rounded text-[10px] font-extrabold bg-emerald-50 hover:bg-emerald-100 text-emerald-800 border border-emerald-200"
+                        title="Diária integral (5h) = R$ 100,00"
+                      >
+                        5h (R$ 100)
+                      </button>
+                      {selectedPromoterId && getPendingBalance(selectedPromoterId) > 0 && (
+                        <button
+                          type="button"
+                          onClick={() => setAmount(String(getPendingBalance(selectedPromoterId)))}
+                          className="px-1.5 py-0.5 rounded text-[10px] font-extrabold bg-indigo-50 hover:bg-indigo-100 text-indigo-700 border border-indigo-200"
+                          title="Usar saldo de diárias pendentes deste promotor"
+                        >
+                          Saldo: {formatCurrency(getPendingBalance(selectedPromoterId))}
+                        </button>
+                      )}
+                    </div>
+                  </div>
                   <div className="relative">
                     <span className="absolute left-4 top-1/2 -translate-y-1/2 text-zinc-400 text-sm">R$</span>
                     <input 
@@ -1106,6 +1219,17 @@ export default function AdvanceManager({ promoters, readOnly }: AdvanceManagerPr
                     {globalCopied ? <Check size={12} /> : <Copy size={12} />}
                     {globalCopied ? 'Copiado!' : 'Copiar Toda Pendência'}
                   </button>
+                  {!readOnly && (
+                    <button 
+                      onClick={handleSyncPendingAdvancesWithAttendance} 
+                      disabled={processing}
+                      className="text-xs font-bold text-amber-700 hover:text-amber-900 bg-amber-50 hover:bg-amber-100 border border-amber-200 px-2.5 py-1 rounded-lg flex items-center gap-1.5 transition-colors disabled:opacity-50"
+                      title="Atualizar valores em adiantamento pendente com base nas presenças e horas calculadas (ex: ½ hora = R$ 10,00)"
+                    >
+                      <RefreshCw size={12} className={processing ? 'animate-spin' : ''} />
+                      Atualizar Valores Pendentes
+                    </button>
+                  )}
                   {selectedBalances.size > 0 && (
                     <button 
                       onClick={copySelectedBalances}
@@ -1297,13 +1421,26 @@ export default function AdvanceManager({ promoters, readOnly }: AdvanceManagerPr
                                 </button>
                               </div>
                             ) : (
-                              <button 
-                                disabled={processing}
-                                onClick={() => handleToggleStatus(item.advance)}
-                                className="bg-brand-lime text-brand-dark px-3 py-1.5 rounded-lg text-[10px] font-black uppercase tracking-wider hover:bg-opacity-90 disabled:opacity-50 transition-all shadow-sm border border-brand-dark/10 flex items-center gap-2"
-                              >
-                                <DollarSign size={12} /> Pagar Agora
-                              </button>
+                              <div className="flex items-center gap-1.5">
+                                <button 
+                                  disabled={processing}
+                                  onClick={() => handleToggleStatus(item.advance)}
+                                  className="bg-brand-lime text-brand-dark px-3 py-1.5 rounded-lg text-[10px] font-black uppercase tracking-wider hover:bg-opacity-90 disabled:opacity-50 transition-all shadow-sm border border-brand-dark/10 flex items-center gap-2"
+                                >
+                                  <DollarSign size={12} /> Pagar Agora
+                                </button>
+                                <button 
+                                  disabled={processing}
+                                  onClick={() => {
+                                    setEditingAdvance(item.advance);
+                                    setEditAmount(String(item.advance.amount));
+                                  }}
+                                  className="p-1.5 text-zinc-500 hover:text-indigo-600 hover:bg-indigo-50 rounded-lg transition-all border border-zinc-200"
+                                  title="Atualizar / Editar valor do adiantamento pendente"
+                                >
+                                  <Edit3 size={13} />
+                                </button>
+                              </div>
                             )
                           )}
                           <button 
@@ -1520,13 +1657,26 @@ export default function AdvanceManager({ promoters, readOnly }: AdvanceManagerPr
                         {!readOnly && (
                           <div className="flex justify-end gap-2 text-zinc-900">
                             {advance.status === 'pending' ? (
-                              <button 
-                                disabled={processing}
-                                onClick={() => handleToggleStatus(advance)}
-                                className="bg-brand-lime text-brand-dark px-3 py-1.5 rounded-lg text-[10px] font-black uppercase tracking-wider hover:bg-opacity-90 disabled:opacity-50 transition-all shadow-sm border border-brand-dark/10 flex items-center gap-2"
-                              >
-                                <DollarSign size={12} /> Pagar Agora
-                              </button>
+                              <div className="flex items-center gap-1.5">
+                                <button 
+                                  disabled={processing}
+                                  onClick={() => handleToggleStatus(advance)}
+                                  className="bg-brand-lime text-brand-dark px-3 py-1.5 rounded-lg text-[10px] font-black uppercase tracking-wider hover:bg-opacity-90 disabled:opacity-50 transition-all shadow-sm border border-brand-dark/10 flex items-center gap-2"
+                                >
+                                  <DollarSign size={12} /> Pagar Agora
+                                </button>
+                                <button 
+                                  disabled={processing}
+                                  onClick={() => {
+                                    setEditingAdvance(advance);
+                                    setEditAmount(String(advance.amount));
+                                  }}
+                                  className="p-1.5 text-zinc-500 hover:text-indigo-600 hover:bg-indigo-50 rounded-lg transition-all border border-zinc-200"
+                                  title="Atualizar / Editar valor do adiantamento pendente"
+                                >
+                                  <Edit3 size={13} />
+                                </button>
+                              </div>
                             ) : (
                               <button 
                                 disabled={processing}
@@ -1747,6 +1897,107 @@ export default function AdvanceManager({ promoters, readOnly }: AdvanceManagerPr
                 <span>Estornar Saldo Total</span>
               </button>
             </div>
+          </div>
+        </div>
+      )}
+
+      {/* Modal para Atualizar Valor do Adiantamento Pendente */}
+      {editingAdvance && (
+        <div className="fixed inset-0 z-50 bg-black/50 backdrop-blur-xs flex items-center justify-center p-4">
+          <div className="bg-white rounded-2xl max-w-md w-full p-6 shadow-2xl border border-zinc-200 space-y-4">
+            <div className="flex items-center justify-between border-b border-zinc-100 pb-3">
+              <div className="flex items-center gap-2">
+                <div className="p-2 bg-amber-50 text-amber-600 rounded-xl">
+                  <Edit3 size={18} />
+                </div>
+                <div>
+                  <h3 className="font-black text-sm text-zinc-900 uppercase tracking-wider">Atualizar Adiantamento Pendente</h3>
+                  <p className="text-xs text-zinc-500">{editingAdvance.promoterName || 'Promotor'}</p>
+                </div>
+              </div>
+              <button 
+                type="button" 
+                onClick={() => setEditingAdvance(null)}
+                className="text-zinc-400 hover:text-zinc-600 p-1 rounded-lg"
+              >
+                <XCircle size={20} />
+              </button>
+            </div>
+
+            <form onSubmit={handleSaveEditedAdvance} className="space-y-4">
+              <div className="space-y-2">
+                <label className="text-xs font-bold uppercase tracking-wider text-zinc-500">
+                  Novo Valor do Adiantamento (R$)
+                </label>
+                <div className="relative">
+                  <span className="absolute left-4 top-1/2 -translate-y-1/2 text-zinc-400 font-bold text-sm">R$</span>
+                  <input 
+                    type="number"
+                    step="0.01"
+                    min="0.01"
+                    required
+                    value={editAmount}
+                    onChange={(e) => setEditAmount(e.target.value)}
+                    className="w-full rounded-xl border border-zinc-200 bg-zinc-50 pl-10 pr-4 py-2.5 text-sm font-black text-zinc-900 focus:outline-none focus:ring-4 focus:ring-brand-lime/10 focus:border-brand-lime"
+                    placeholder="0,00"
+                    autoFocus
+                  />
+                </div>
+
+                {/* Atalhos Rápidos de Cálculo */}
+                <div className="flex flex-wrap items-center gap-1.5 pt-1">
+                  <span className="text-[10px] font-bold text-zinc-400 uppercase tracking-wider">Atalhos:</span>
+                  <button
+                    type="button"
+                    onClick={() => setEditAmount('10')}
+                    className="px-2 py-1 rounded-lg text-xs font-bold bg-amber-50 hover:bg-amber-100 text-amber-800 border border-amber-200 transition-colors"
+                  >
+                    ½h: R$ 10,00
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setEditAmount('50')}
+                    className="px-2 py-1 rounded-lg text-xs font-bold bg-zinc-100 hover:bg-zinc-200 text-zinc-700 border border-zinc-200 transition-colors"
+                  >
+                    2,5h: R$ 50,00
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setEditAmount('100')}
+                    className="px-2 py-1 rounded-lg text-xs font-bold bg-emerald-50 hover:bg-emerald-100 text-emerald-800 border border-emerald-200 transition-colors"
+                  >
+                    5h: R$ 100,00
+                  </button>
+                  {weeklyPending[editingAdvance.promoterId] !== undefined && weeklyPending[editingAdvance.promoterId] > 0 && (
+                    <button
+                      type="button"
+                      onClick={() => setEditAmount(String(weeklyPending[editingAdvance.promoterId]))}
+                      className="px-2 py-1 rounded-lg text-xs font-bold bg-indigo-50 hover:bg-indigo-100 text-indigo-700 border border-indigo-200 transition-colors"
+                    >
+                      Saldo Presença: {formatCurrency(weeklyPending[editingAdvance.promoterId])}
+                    </button>
+                  )}
+                </div>
+              </div>
+
+              <div className="flex items-center justify-end gap-2 pt-2 border-t border-zinc-100">
+                <button
+                  type="button"
+                  onClick={() => setEditingAdvance(null)}
+                  className="px-4 py-2 text-xs font-bold text-zinc-600 bg-zinc-100 hover:bg-zinc-200 rounded-xl transition-colors"
+                >
+                  Cancelar
+                </button>
+                <button
+                  type="submit"
+                  disabled={processing}
+                  className="px-5 py-2 text-xs font-black text-brand-dark bg-brand-lime hover:bg-opacity-90 rounded-xl transition-all shadow-sm border border-brand-dark/10 flex items-center gap-1.5 disabled:opacity-50"
+                >
+                  {processing ? <div className="h-3 w-3 animate-spin rounded-full border border-brand-dark/30 border-t-brand-dark" /> : <Check size={14} />}
+                  Salvar Valor
+                </button>
+              </div>
+            </form>
           </div>
         </div>
       )}

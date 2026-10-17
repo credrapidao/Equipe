@@ -11,6 +11,9 @@ import { Promoter, Attendance, OperationType, Team } from '../types';
 import { handleFirestoreError, formatDate } from '../lib/utils';
 import { useTeams, getTeamDisplay, getTeamColorStyle } from '../lib/teams';
 
+export const HOURLY_RATE = 20; // R$ 20,00 por hora trabalhada
+export const DEFAULT_HOURS = 5; // 5 horas padrão de trabalho
+
 interface AttendanceTrackerProps {
   promoters: Promoter[];
   readOnly?: boolean;
@@ -28,6 +31,7 @@ export default function AttendanceTracker({
   const teamsList = propTeams && propTeams.length > 0 ? propTeams : hookTeams;
   const [selectedDate, setSelectedDate] = useState(formatDate(new Date()));
   const [attendanceData, setAttendanceData] = useState<Record<string, Attendance>>({});
+  const [inputHours, setInputHours] = useState<Record<string, string>>({});
   const [loading, setLoading] = useState(true);
   const [filterOnlyLoaned, setFilterOnlyLoaned] = useState(false);
 
@@ -65,26 +69,38 @@ export default function AttendanceTracker({
 
   const toggleStatus = async (promoterId: string, status: Attendance['status']) => {
     const existing = attendanceData[promoterId];
-    const promoter = promoters.find(p => p.id === promoterId);
-    const defaultRate = promoter?.defaultDailyRate || 100;
     const attendanceId = existing?.id || selectedDate;
     const docRef = doc(db, `promoters/${promoterId}/attendance`, attendanceId);
 
-    const defaultHours = status === 'present' ? 5 : (status === 'half-day' ? 2.5 : 0);
+    const defaultHours = status === 'present' ? DEFAULT_HOURS : (status === 'half-day' ? 2.5 : 0);
+    const targetHours = status === 'absent' 
+      ? 0 
+      : (existing?.workedHours !== undefined && existing?.workedHours > 0 ? existing.workedHours : defaultHours);
+    const calculatedRate = targetHours * HOURLY_RATE;
 
     try {
       if (existing && existing.status === status) {
         await deleteDoc(docRef);
+        setInputHours(prev => {
+          const next = { ...prev };
+          delete next[promoterId];
+          return next;
+        });
       } else {
         await setDoc(docRef, {
           promoterId,
           date: selectedDate,
           status,
           paymentStatus: existing?.paymentStatus || 'pending',
-          dailyRate: existing?.dailyRate || defaultRate,
-          workedHours: existing?.workedHours !== undefined ? existing.workedHours : defaultHours,
+          dailyRate: calculatedRate,
+          workedHours: targetHours,
           isLoaned: existing?.isLoaned ?? false,
           recordedAt: existing?.recordedAt || new Date().toISOString()
+        });
+        setInputHours(prev => {
+          const next = { ...prev };
+          delete next[promoterId];
+          return next;
         });
       }
     } catch (err) {
@@ -105,8 +121,6 @@ export default function AttendanceTracker({
 
   const toggleLoaned = async (promoterId: string, isLoaned: boolean) => {
     const existing = attendanceData[promoterId];
-    const promoter = promoters.find(p => p.id === promoterId);
-    const defaultRate = promoter?.defaultDailyRate || 100;
     const attendanceId = existing?.id || selectedDate;
     const docRef = doc(db, `promoters/${promoterId}/attendance`, attendanceId);
 
@@ -114,14 +128,15 @@ export default function AttendanceTracker({
       if (existing) {
         await updateDoc(docRef, { isLoaned });
       } else {
-        // Se ainda não tinha presença registrada, cria marcando presença com 5h padrão e emprestado
+        const defaultHours = DEFAULT_HOURS;
+        const calculatedRate = defaultHours * HOURLY_RATE;
         await setDoc(docRef, {
           promoterId,
           date: selectedDate,
           status: 'present',
           paymentStatus: 'pending',
-          dailyRate: defaultRate,
-          workedHours: 5,
+          dailyRate: calculatedRate,
+          workedHours: defaultHours,
           isLoaned,
           recordedAt: new Date().toISOString()
         });
@@ -133,23 +148,29 @@ export default function AttendanceTracker({
 
   const updateWorkedHours = async (promoterId: string, hours: number) => {
     const existing = attendanceData[promoterId];
-    const promoter = promoters.find(p => p.id === promoterId);
-    const defaultRate = promoter?.defaultDailyRate || 100;
     const attendanceId = existing?.id || selectedDate;
     const docRef = doc(db, `promoters/${promoterId}/attendance`, attendanceId);
 
     const cleanHours = Math.max(0, Math.min(24, isNaN(hours) ? 0 : hours));
+    const calculatedRate = cleanHours * HOURLY_RATE;
+    const calculatedStatus: Attendance['status'] = cleanHours >= DEFAULT_HOURS 
+      ? 'present' 
+      : (cleanHours > 0 ? 'half-day' : 'absent');
 
     try {
       if (existing) {
-        await updateDoc(docRef, { workedHours: cleanHours });
+        await updateDoc(docRef, { 
+          workedHours: cleanHours,
+          dailyRate: calculatedRate,
+          status: calculatedStatus
+        });
       } else {
         await setDoc(docRef, {
           promoterId,
           date: selectedDate,
-          status: cleanHours >= 5 ? 'present' : (cleanHours > 0 ? 'half-day' : 'absent'),
+          status: calculatedStatus,
           paymentStatus: 'pending',
-          dailyRate: defaultRate,
+          dailyRate: calculatedRate,
           workedHours: cleanHours,
           isLoaned: false,
           recordedAt: new Date().toISOString()
@@ -190,6 +211,7 @@ export default function AttendanceTracker({
     let absent = 0;
     let totalHours = 0;
     let loaned = 0;
+    let totalAmount = 0;
 
     promoters.forEach(p => {
       const att = attendanceData[p.id];
@@ -197,13 +219,15 @@ export default function AttendanceTracker({
         if (att.status === 'present') present++;
         if (att.status === 'half-day') halfDay++;
         if (att.status === 'absent') absent++;
-        const h = att.workedHours !== undefined ? att.workedHours : (att.status === 'present' ? 5 : (att.status === 'half-day' ? 2.5 : 0));
+        const h = att.workedHours !== undefined ? att.workedHours : (att.status === 'present' ? DEFAULT_HOURS : (att.status === 'half-day' ? 2.5 : 0));
         totalHours += h;
         if (att.isLoaned) loaned++;
+        const pay = att.dailyRate !== undefined ? att.dailyRate : (h * HOURLY_RATE);
+        totalAmount += pay;
       }
     });
 
-    return { present, halfDay, absent, totalHours, loaned, total: promoters.length };
+    return { present, halfDay, absent, totalHours, loaned, totalAmount, total: promoters.length };
   }, [promoters, attendanceData]);
 
   const visiblePromoters = useMemo(() => {
@@ -295,7 +319,14 @@ export default function AttendanceTracker({
           <div className="flex items-center gap-1.5 pl-2 border-l border-zinc-200">
             <Clock size={14} className="text-zinc-400" />
             <span className="text-zinc-600">Horas Totais:</span>
-            <strong className="text-zinc-900 font-bold">{dayStats.totalHours}h</strong>
+            <strong className="text-zinc-900 font-bold">{Number(dayStats.totalHours.toFixed(1)).toLocaleString('pt-BR')}h</strong>
+          </div>
+          <div className="flex items-center gap-1.5 pl-2 border-l border-zinc-200">
+            <span className="text-emerald-600 font-black">R$</span>
+            <span className="text-zinc-600">Total a Pagar (Equipe):</span>
+            <strong className="text-emerald-700 font-black bg-emerald-50 border border-emerald-200 px-2 py-0.5 rounded-lg">
+              R$ {dayStats.totalAmount.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+            </strong>
           </div>
           <div className="flex items-center gap-1.5 pl-2 border-l border-zinc-200">
             <span className="w-2.5 h-2.5 rounded-full bg-purple-500" />
@@ -334,12 +365,20 @@ export default function AttendanceTracker({
           <div className="flex items-center gap-2">
             <span className="text-base">📋</span>
             <span>
-              <strong>Painel do Supervisor:</strong> Marque a <strong>Presença</strong> (padrão de 5h), confira ou ajuste as <strong>Horas Trabalhadas</strong> e, se o promotor foi emprestado, marque a caixinha <strong>Emprestado?</strong>.
+              <strong>Painel do Supervisor:</strong> Valor fixado em <strong>R$ 20,00 por hora</strong>. Cálculo exato por tempo trabalhado (ex: <strong>metade de uma hora (30m) = R$ 10,00</strong>; 2,5h = R$ 50,00; 5h = R$ 100,00).
             </span>
           </div>
-          <span className="text-[11px] font-bold text-blue-700 bg-white px-2 py-0.5 rounded-full border border-blue-200 shrink-0 shadow-2xs">
-            ✓ Salvamento em Tempo Real
-          </span>
+          <div className="flex items-center gap-2">
+            <span className="text-[11px] font-extrabold text-amber-900 bg-amber-100 px-2.5 py-0.5 rounded-full border border-amber-200 shrink-0">
+              ½h (30 min) = R$ 10,00
+            </span>
+            <span className="text-[11px] font-extrabold text-emerald-800 bg-emerald-100 px-2.5 py-0.5 rounded-full border border-emerald-200 shrink-0">
+              Taxa: R$ 20,00/h
+            </span>
+            <span className="text-[11px] font-bold text-blue-700 bg-white px-2 py-0.5 rounded-full border border-blue-200 shrink-0 shadow-2xs">
+              ✓ Salvamento Automático
+            </span>
+          </div>
         </div>
       )}
 
@@ -351,12 +390,15 @@ export default function AttendanceTracker({
               <th className="px-6 py-4">Promotor</th>
               <th className="px-6 py-4">Presença</th>
               <th className="px-6 py-4 text-center">Horas Trabalhadas</th>
+              <th className="px-6 py-4 text-center">
+                <div className="flex flex-col items-center">
+                  <span>A Receber</span>
+                  <span className="text-[9px] font-bold text-emerald-600 normal-case">(R$ 20,00/h)</span>
+                </div>
+              </th>
               <th className="px-6 py-4 text-center">Emprestado?</th>
               {!isSupervisor && (
-                <>
-                  <th className="px-6 py-4">Valor Diária</th>
-                  <th className="px-6 py-4 text-right">Pagamento</th>
-                </>
+                <th className="px-6 py-4 text-right">Pagamento</th>
               )}
             </tr>
           </thead>
@@ -366,11 +408,28 @@ export default function AttendanceTracker({
               const teamDisplay = getTeamDisplay(promoter.team, teamsList);
               const teamStyle = getTeamColorStyle(teamDisplay.color);
               
-              const currentHours = attendance 
-                ? (attendance.workedHours !== undefined 
-                    ? attendance.workedHours 
-                    : (attendance.status === 'present' ? 5 : (attendance.status === 'half-day' ? 2.5 : 0)))
-                : '';
+              // Local input or persisted hours
+              const rawInput = inputHours[promoter.id];
+              const currentHoursDisplay = rawInput !== undefined
+                ? rawInput
+                : (attendance 
+                    ? (attendance.workedHours !== undefined 
+                        ? String(attendance.workedHours) 
+                        : (attendance.status === 'present' ? '5' : (attendance.status === 'half-day' ? '2.5' : '0')))
+                    : '');
+
+              const parsedInput = rawInput !== undefined && rawInput !== '' 
+                ? parseFloat(rawInput.replace(',', '.')) 
+                : null;
+              const effectiveHours = parsedInput !== null && !isNaN(parsedInput)
+                ? parsedInput
+                : (attendance 
+                    ? (attendance.workedHours !== undefined 
+                        ? attendance.workedHours 
+                        : (attendance.status === 'present' ? DEFAULT_HOURS : (attendance.status === 'half-day' ? 2.5 : 0)))
+                    : null);
+
+              const calculatedPay = effectiveHours !== null ? effectiveHours * HOURLY_RATE : null;
 
               return (
                 <tr key={promoter.id} className="hover:bg-zinc-50/50 transition-colors group">
@@ -408,7 +467,7 @@ export default function AttendanceTracker({
                         active={attendance?.status === 'present'} 
                         icon={<Check size={15} />} 
                         activeColor="green"
-                        title="Presente (5 horas padrão)"
+                        title="Presente (5 horas padrão = R$ 100,00)"
                         onClick={() => toggleStatus(promoter.id, 'present')} 
                         disabled={readOnly}
                       />
@@ -416,7 +475,7 @@ export default function AttendanceTracker({
                         active={attendance?.status === 'half-day'} 
                         icon={<Clock size={15} />} 
                         activeColor="yellow"
-                        title="Meio Período (2,5 horas padrão)"
+                        title="Meio Período (2,5 horas padrão = R$ 50,00)"
                         onClick={() => toggleStatus(promoter.id, 'half-day')} 
                         disabled={readOnly}
                       />
@@ -424,30 +483,121 @@ export default function AttendanceTracker({
                         active={attendance?.status === 'absent'} 
                         icon={<X size={15} />} 
                         activeColor="red"
-                        title="Falta (0 horas)"
+                        title="Falta (0 horas = R$ 0,00)"
                         onClick={() => toggleStatus(promoter.id, 'absent')} 
                         disabled={readOnly}
                       />
                     </div>
                   </td>
 
-                  {/* Worked Hours Input */}
+                  {/* Worked Hours Input & Quick Presets */}
                   <td className="px-6 py-4 text-center">
-                    <div className="flex items-center justify-center gap-1.5">
-                      <input 
-                        type="number"
-                        min="0"
-                        max="24"
-                        step="0.5"
-                        disabled={readOnly}
-                        value={currentHours}
-                        placeholder={attendance ? '5' : '0'}
-                        onChange={(e) => updateWorkedHours(promoter.id, Number(e.target.value))}
-                        className="w-16 bg-zinc-50 border border-zinc-200 hover:border-zinc-300 focus:border-indigo-500 focus:bg-white rounded-xl px-2 py-1.5 text-xs font-bold text-zinc-900 text-center focus:outline-none transition-all disabled:opacity-50"
-                        title="Digite a quantidade de horas trabalhadas no dia (padrão 5h)"
-                      />
-                      <span className="text-xs font-bold text-zinc-400">h</span>
+                    <div className="flex flex-col items-center gap-1.5">
+                      <div className="flex items-center justify-center gap-1.5">
+                        <input 
+                          type="number"
+                          min="0"
+                          max="24"
+                          step="0.5"
+                          disabled={readOnly}
+                          value={currentHoursDisplay}
+                          placeholder={attendance ? '5' : '0'}
+                          onChange={(e) => {
+                            const val = e.target.value;
+                            setInputHours(prev => ({ ...prev, [promoter.id]: val }));
+                            const num = parseFloat(val.replace(',', '.'));
+                            if (!isNaN(num)) {
+                              updateWorkedHours(promoter.id, num);
+                            }
+                          }}
+                          onBlur={() => {
+                            setInputHours(prev => {
+                              const next = { ...prev };
+                              delete next[promoter.id];
+                              return next;
+                            });
+                          }}
+                          className="w-16 bg-zinc-50 border border-zinc-200 hover:border-zinc-300 focus:border-indigo-500 focus:bg-white rounded-xl px-2 py-1.5 text-xs font-bold text-zinc-900 text-center focus:outline-none transition-all disabled:opacity-50"
+                          title="Digite as horas trabalhadas (ex: 0.5 para meia hora, 1, 2.5, 5)"
+                        />
+                        <span className="text-xs font-bold text-zinc-400">h</span>
+                      </div>
+
+                      {/* Quick Presets for Common Shifts */}
+                      <div className="flex items-center gap-1">
+                        <button
+                          type="button"
+                          disabled={readOnly}
+                          onClick={() => {
+                            setInputHours(prev => ({ ...prev, [promoter.id]: '0.5' }));
+                            updateWorkedHours(promoter.id, 0.5);
+                          }}
+                          className={`px-1.5 py-0.5 rounded text-[10px] font-extrabold border transition-all ${
+                            effectiveHours === 0.5
+                              ? 'bg-amber-100 text-amber-800 border-amber-300 shadow-2xs'
+                              : 'bg-zinc-100/80 hover:bg-zinc-200/90 text-zinc-600 border-zinc-200'
+                          }`}
+                          title="Metade de 1 hora (30 minutos) = R$ 10,00"
+                        >
+                          ½h (R$ 10)
+                        </button>
+                        <button
+                          type="button"
+                          disabled={readOnly}
+                          onClick={() => {
+                            setInputHours(prev => ({ ...prev, [promoter.id]: '2.5' }));
+                            updateWorkedHours(promoter.id, 2.5);
+                          }}
+                          className={`px-1.5 py-0.5 rounded text-[10px] font-extrabold border transition-all ${
+                            effectiveHours === 2.5
+                              ? 'bg-amber-100 text-amber-800 border-amber-300 shadow-2xs'
+                              : 'bg-zinc-100/80 hover:bg-zinc-200/90 text-zinc-600 border-zinc-200'
+                          }`}
+                          title="Meio período padrão (2,5 horas) = R$ 50,00"
+                        >
+                          2,5h
+                        </button>
+                        <button
+                          type="button"
+                          disabled={readOnly}
+                          onClick={() => {
+                            setInputHours(prev => ({ ...prev, [promoter.id]: '5' }));
+                            updateWorkedHours(promoter.id, 5);
+                          }}
+                          className={`px-1.5 py-0.5 rounded text-[10px] font-extrabold border transition-all ${
+                            effectiveHours === 5
+                              ? 'bg-emerald-100 text-emerald-800 border-emerald-300 shadow-2xs'
+                              : 'bg-zinc-100/80 hover:bg-zinc-200/90 text-zinc-600 border-zinc-200'
+                          }`}
+                          title="Dia completo padrão (5 horas) = R$ 100,00"
+                        >
+                          5h
+                        </button>
+                      </div>
                     </div>
+                  </td>
+
+                  {/* Calculated Pay (R$ 20/h) */}
+                  <td className="px-6 py-4 text-center">
+                    {calculatedPay !== null ? (
+                      <div className="inline-flex flex-col items-center">
+                        <div className={`inline-flex items-center gap-1 px-3 py-1 rounded-xl text-xs font-black tabular-nums border shadow-2xs ${
+                          calculatedPay > 0 
+                            ? (effectiveHours === 0.5 
+                                ? 'bg-amber-50 text-amber-800 border-amber-200' 
+                                : 'bg-emerald-50 text-emerald-700 border-emerald-200')
+                            : 'bg-zinc-50 text-zinc-400 border-zinc-200'
+                        }`}>
+                          <span>R$</span>
+                          <span>{calculatedPay.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
+                        </div>
+                        <span className="text-[10px] text-zinc-400 font-medium mt-0.5">
+                          {effectiveHours === 0.5 ? '½h (30 min) × R$ 20,00' : `${String(effectiveHours).replace('.', ',')}h × R$ 20,00`}
+                        </span>
+                      </div>
+                    ) : (
+                      <span className="text-zinc-300 text-xs font-bold">---</span>
+                    )}
                   </td>
 
                   {/* Loaned Checkbox */}
@@ -470,43 +620,24 @@ export default function AttendanceTracker({
                     </label>
                   </td>
 
-                  {/* Admin Only: Daily Rate & Payment Status */}
+                  {/* Admin Only: Payment Status */}
                   {!isSupervisor && (
-                    <>
-                      <td className="px-6 py-4">
-                        {attendance ? (
-                          <div className="flex items-center gap-1.5 group/input">
-                            <span className="text-zinc-400 text-xs font-bold">R$</span>
-                            <input 
-                              type="number"
-                              disabled={readOnly}
-                              value={attendance.dailyRate}
-                              onChange={(e) => updateAttendanceField(promoter.id, { dailyRate: Number(e.target.value) })}
-                              className="w-20 bg-zinc-50 border border-zinc-100 hover:border-zinc-200 focus:border-brand-lime focus:bg-white rounded-lg px-2 py-1 text-sm font-bold text-zinc-900 focus:outline-none transition-all ring-offset-white focus:ring-2 focus:ring-brand-lime/20 disabled:opacity-55 disabled:cursor-not-allowed"
-                            />
-                          </div>
-                        ) : (
-                          <span className="text-zinc-300 text-[10px] font-bold uppercase tracking-widest pl-4">---</span>
-                        )}
-                      </td>
-
-                      <td className="px-6 py-4 text-right">
-                        {attendance ? (
-                          <button 
-                            disabled={readOnly}
-                            onClick={() => updateAttendanceField(promoter.id, { paymentStatus: attendance.paymentStatus === 'paid' ? 'pending' : 'paid' })}
-                            className={`inline-flex items-center gap-2 px-4 py-2 rounded-xl text-[10px] font-bold uppercase tracking-widest transition-all shadow-sm ${readOnly ? 'opacity-85 cursor-default' : ''} ${
-                              attendance.paymentStatus === 'paid' 
-                                ? 'bg-brand-lime text-brand-dark border border-brand-lime shadow-brand-lime/10' 
-                                : 'bg-amber-50 text-amber-700 border border-amber-200'
-                            }`}
-                          >
-                            {attendance.paymentStatus === 'paid' ? <Check size={14} /> : <Clock size={14} />}
-                            {attendance.paymentStatus === 'paid' ? 'Quitado' : 'Pendente'}
-                          </button>
-                        ) : null}
-                      </td>
-                    </>
+                    <td className="px-6 py-4 text-right">
+                      {attendance ? (
+                        <button 
+                          disabled={readOnly}
+                          onClick={() => updateAttendanceField(promoter.id, { paymentStatus: attendance.paymentStatus === 'paid' ? 'pending' : 'paid' })}
+                          className={`inline-flex items-center gap-2 px-4 py-2 rounded-xl text-[10px] font-bold uppercase tracking-widest transition-all shadow-sm ${readOnly ? 'opacity-85 cursor-default' : ''} ${
+                            attendance.paymentStatus === 'paid' 
+                              ? 'bg-brand-lime text-brand-dark border border-brand-lime shadow-brand-lime/10' 
+                              : 'bg-amber-50 text-amber-700 border border-amber-200'
+                          }`}
+                        >
+                          {attendance.paymentStatus === 'paid' ? <Check size={14} /> : <Clock size={14} />}
+                          {attendance.paymentStatus === 'paid' ? 'Quitado' : 'Pendente'}
+                        </button>
+                      ) : null}
+                    </td>
                   )}
                 </tr>
               );

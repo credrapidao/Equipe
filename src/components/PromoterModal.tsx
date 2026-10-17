@@ -205,7 +205,9 @@ export default function PromoterModal({ isOpen, onClose, editingPromoter, teams:
 
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
               <div className="space-y-1.5">
-                <label className="text-xs font-bold uppercase tracking-wider text-zinc-500">Valor da Diária Padrão</label>
+                <label className="text-xs font-bold uppercase tracking-wider text-zinc-500">
+                  Valor da Diária Padrão <span className="text-zinc-400 font-normal lowercase">(R$ 20,00/h × 5h)</span>
+                </label>
                 <div className="relative">
                   <span className="absolute left-4 top-1/2 -translate-y-1/2 text-zinc-400 text-sm">R$</span>
                   <input 
