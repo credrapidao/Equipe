@@ -3,7 +3,7 @@ import { Calendar, User, Trash2, Plus, AlertCircle, Coins, Search, FileText } fr
 import { db } from '../lib/firebase';
 import { collection, addDoc, deleteDoc, doc } from 'firebase/firestore';
 import { Employee, EmployeeAbsence, OperationType } from '../types';
-import { handleFirestoreError } from '../lib/utils';
+import { handleFirestoreError, formatDate } from '../lib/utils';
 
 interface EmployeeAbsenceManagerProps {
   employees: Employee[];
@@ -13,7 +13,7 @@ interface EmployeeAbsenceManagerProps {
 
 export function EmployeeAbsenceManager({ employees, allAbsences, readOnly }: EmployeeAbsenceManagerProps) {
   const [selectedEmployeeId, setSelectedEmployeeId] = useState<string>('');
-  const [date, setDate] = useState<string>(new Date().toISOString().split('T')[0]);
+  const [date, setDate] = useState<string>(formatDate(new Date()));
   const [reason, setReason] = useState<string>('Falta injustificada');
   const [discount, setDiscount] = useState<number>(0);
   const [isSubmitting, setIsSubmitting] = useState(false);

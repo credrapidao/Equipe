@@ -17,6 +17,7 @@ import {
 import { db, googleSignIn, getAccessToken, setAccessToken } from '../lib/firebase';
 import { doc, getDoc, setDoc, serverTimestamp } from 'firebase/firestore';
 import { Promoter, Attendance, Advance } from '../types';
+import { formatDateTime } from '../lib/utils';
 
 interface GoogleSheetsSyncProps {
   promoters: Promoter[];
@@ -53,7 +54,7 @@ export default function GoogleSheetsSync({
           setSpreadsheetUrl(data.spreadsheetUrl || null);
           if (data.updatedAt) {
             const date = data.updatedAt.toDate ? data.updatedAt.toDate() : new Date(data.updatedAt);
-            setLastSync(date.toLocaleString('pt-BR'));
+            setLastSync(formatDateTime(date));
           }
         }
       } catch (error) {
@@ -121,9 +122,9 @@ export default function GoogleSheetsSync({
 
       const totalDiarias = promoterAttendance.reduce((sum, a) => {
         if (a.status === 'absent') return sum;
-        const val = a.dailyRate !== undefined 
-          ? a.dailyRate 
-          : (a.workedHours !== undefined ? a.workedHours * 20 : (a.status === 'half-day' ? 50 : (p.defaultDailyRate || 100)));
+        const val = a.workedHours !== undefined 
+          ? a.workedHours * 20 
+          : (a.status === 'half-day' ? 50 : (a.dailyRate !== undefined ? a.dailyRate : (p.defaultDailyRate || 100)));
         return sum + val;
       }, 0);
 
@@ -167,9 +168,9 @@ export default function GoogleSheetsSync({
       const promoterName = promoter ? promoter.name : 'Promotor Excluído';
       const value = a.status === 'absent' 
         ? 0 
-        : (a.dailyRate !== undefined 
-            ? a.dailyRate 
-            : (a.workedHours !== undefined ? a.workedHours * 20 : (a.status === 'half-day' ? 50 : (promoter?.defaultDailyRate || 100))));
+        : (a.workedHours !== undefined 
+            ? a.workedHours * 20 
+            : (a.status === 'half-day' ? 50 : (a.dailyRate !== undefined ? a.dailyRate : (promoter?.defaultDailyRate || 100))));
 
       return [
         formatToBrazilianDate(a.date),
@@ -390,7 +391,7 @@ export default function GoogleSheetsSync({
 
       setSpreadsheetId(newSpreadsheetId);
       setSpreadsheetUrl(newSpreadsheetUrl);
-      setLastSync(new Date().toLocaleString('pt-BR'));
+      setLastSync(formatDateTime(new Date()));
       setStatusMessage({
         type: 'success',
         text: 'Planilha criada no Google Drive e dados sincronizados com sucesso!'
@@ -528,7 +529,7 @@ export default function GoogleSheetsSync({
         updatedAt: serverTimestamp()
       }, { merge: true });
 
-      setLastSync(new Date().toLocaleString('pt-BR'));
+      setLastSync(formatDateTime(new Date()));
       setStatusMessage({
         type: 'success',
         text: 'Planilha atualizada com sucesso com as informações mais recentes!'

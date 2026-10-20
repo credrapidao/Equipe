@@ -30,8 +30,54 @@ export function handleFirestoreError(error: unknown, operationType: OperationTyp
   console.error('Firestore Error:', errInfo);
 }
 
-export function formatDate(date: Date): string {
-  return date.toISOString().split('T')[0];
+// Fuso horário oficial: Horário de Brasília / São Paulo (UTC-3)
+export const TIMEZONE = 'America/Sao_Paulo';
+
+/**
+ * Retorna a data no fuso horário de São Paulo no formato padrão YYYY-MM-DD
+ */
+export function formatDate(date: Date = new Date()): string {
+  return new Intl.DateTimeFormat('en-CA', {
+    timeZone: TIMEZONE,
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit'
+  }).format(date);
+}
+
+/**
+ * Retorna data e hora formatadas em pt-BR no fuso horário de São Paulo
+ */
+export function formatDateTime(date: Date = new Date()): string {
+  return new Intl.DateTimeFormat('pt-BR', {
+    timeZone: TIMEZONE,
+    dateStyle: 'short',
+    timeStyle: 'medium'
+  }).format(date);
+}
+
+/**
+ * Retorna apenas o horário formatado (HH:mm:ss) no fuso horário de São Paulo
+ */
+export function formatTime(date: Date = new Date()): string {
+  return new Intl.DateTimeFormat('pt-BR', {
+    timeZone: TIMEZONE,
+    hour: '2-digit',
+    minute: '2-digit',
+    second: '2-digit'
+  }).format(date);
+}
+
+/**
+ * Retorna a data no formato legível brasileiro (DD/MM/YYYY) no fuso de São Paulo
+ */
+export function formatBrazilianDate(date: Date = new Date()): string {
+  return new Intl.DateTimeFormat('pt-BR', {
+    timeZone: TIMEZONE,
+    day: '2-digit',
+    month: '2-digit',
+    year: 'numeric'
+  }).format(date);
 }
 
 export function formatCurrency(amount: number): string {

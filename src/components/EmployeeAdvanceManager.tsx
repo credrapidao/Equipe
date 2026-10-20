@@ -3,7 +3,7 @@ import { Calendar, User, Trash2, Plus, AlertCircle, Coins, Search, Wallet, Copy,
 import { db } from '../lib/firebase';
 import { collection, addDoc, deleteDoc, doc, updateDoc } from 'firebase/firestore';
 import { Employee, EmployeeAdvance, OperationType, Team } from '../types';
-import { handleFirestoreError } from '../lib/utils';
+import { handleFirestoreError, formatDate } from '../lib/utils';
 import { exportEmployeeAdvancesToExcel, exportEmployeeAdvancesToCSV, exportBatchPaymentToExcel, exportBatchPaymentToCSV, BatchPaymentRow } from '../lib/excelExport';
 import { BatchExportModal } from './BatchExportModal';
 
@@ -16,7 +16,7 @@ interface EmployeeAdvanceManagerProps {
 
 export function EmployeeAdvanceManager({ employees, allAdvances, readOnly, teams = [] }: EmployeeAdvanceManagerProps) {
   const [selectedEmployeeId, setSelectedEmployeeId] = useState<string>('');
-  const [date, setDate] = useState<string>(new Date().toISOString().split('T')[0]);
+  const [date, setDate] = useState<string>(formatDate(new Date()));
   const [notes, setNotes] = useState<string>('Adiantamento quinzenal');
   const [amount, setAmount] = useState<number>(0);
   const [status, setStatus] = useState<'pending' | 'paid'>('pending');
@@ -207,7 +207,7 @@ export function EmployeeAdvanceManager({ employees, allAdvances, readOnly, teams
       customHeaders = ['Valor', 'Chave', 'Tipo', 'Nome', 'Documento'];
     }
 
-    const todayStr = new Date().toISOString().split('T')[0];
+    const todayStr = formatDate(new Date());
     if (format === 'csv') {
       exportBatchPaymentToCSV({
         rows: pendingRowsToExport,
@@ -580,7 +580,7 @@ export function EmployeeAdvanceManager({ employees, allAdvances, readOnly, teams
         isOpen={showConfigModal}
         onClose={() => setShowConfigModal(false)}
         rows={pendingRowsToExport}
-        defaultFileName={`Lote_PIX_Pendentes_Funcionarios_${new Date().toISOString().split('T')[0]}`}
+        defaultFileName={`Lote_PIX_Pendentes_Funcionarios_${formatDate(new Date())}`}
         title="Configurar Lote PIX - Adiantamentos de Funcionários"
       />
     </div>

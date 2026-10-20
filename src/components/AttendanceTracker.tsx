@@ -222,7 +222,9 @@ export default function AttendanceTracker({
         const h = att.workedHours !== undefined ? att.workedHours : (att.status === 'present' ? DEFAULT_HOURS : (att.status === 'half-day' ? 2.5 : 0));
         totalHours += h;
         if (att.isLoaned) loaned++;
-        const pay = att.dailyRate !== undefined ? att.dailyRate : (h * HOURLY_RATE);
+        const pay = att.status === 'absent'
+          ? 0
+          : (att.workedHours !== undefined ? att.workedHours * HOURLY_RATE : (att.dailyRate !== undefined ? att.dailyRate : (h * HOURLY_RATE)));
         totalAmount += pay;
       }
     });

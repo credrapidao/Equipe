@@ -235,9 +235,9 @@ export default function App() {
     const unpaidAttendance = filteredAttendance.filter(a => a.paymentStatus === 'pending');
     const totalUnpaidAmount = unpaidAttendance.reduce((sum, a) => {
       if (a.status === 'absent') return sum;
-      const rate = a.dailyRate !== undefined 
-        ? a.dailyRate 
-        : (a.workedHours !== undefined ? a.workedHours * 20 : (a.status === 'half-day' ? 50 : 100));
+      const rate = a.workedHours !== undefined 
+        ? a.workedHours * 20 
+        : (a.dailyRate !== undefined ? a.dailyRate : (a.status === 'half-day' ? 50 : 100));
       return sum + rate;
     }, 0);
 
