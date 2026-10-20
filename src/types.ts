@@ -15,6 +15,7 @@ export interface Team {
 export const DEFAULT_TEAMS: Team[] = [
   { id: 'flash', name: 'Time Flash', icon: '⚡', color: 'indigo', isDefault: true },
   { id: 'rapidao', name: 'Time Rapidão', icon: '🚀', color: 'amber', isDefault: true },
+  { id: 'start', name: 'Time Start', icon: '🌟', color: 'emerald', isDefault: true },
 ];
 
 export interface Promoter {
@@ -26,7 +27,10 @@ export interface Promoter {
   phoneNumber?: string;
   defaultDailyRate: number;
   active: boolean;
-  team?: 'flash' | 'rapidao' | string;
+  team?: 'flash' | 'rapidao' | 'start' | string;
+  isSupervisor?: boolean;
+  supervisorBonus?: number; // Bônus diário por supervisão (padrão R$ 30,00)
+  supervisorTeam?: string; // Equipe supervisionada (ex: 'rapidao', 'flash', 'start')
   createdAt?: string;
   updatedAt?: string;
 }
@@ -42,7 +46,10 @@ export interface Employee {
   phoneNumber?: string;
   baseSalary: number;
   active: boolean;
-  team?: 'flash' | 'rapidao' | 'both' | string;
+  team?: 'flash' | 'rapidao' | 'both' | 'start' | string;
+  isSupervisor?: boolean;
+  supervisorBonus?: number;
+  supervisorTeam?: string;
   admissionDate?: string;
   dismissalDate?: string;
   createdAt?: string;
@@ -77,7 +84,10 @@ export interface Attendance {
   dailyRate: number;
   recordedAt: string;
   workedHours?: number;
+  supervisorBonus?: number; // Bônus diário de supervisão registrado
   isLoaned?: boolean;
+  loanedToTeam?: string; // Equipe de destino para onde o promotor foi emprestado
+  loanedFromTeam?: string; // Equipe de origem
 }
 
 export interface Advance {
@@ -88,6 +98,10 @@ export interface Advance {
   date: string;
   status: 'pending' | 'paid';
   notes?: string;
+  team?: string; // Equipe de destino / responsável pelo adiantamento
+  isLoaned?: boolean;
+  loanedToTeam?: string;
+  loanedFromTeam?: string;
 }
 
 export interface LeadRecord {

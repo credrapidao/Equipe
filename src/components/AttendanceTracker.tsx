@@ -71,12 +71,16 @@ export default function AttendanceTracker({
     const existing = attendanceData[promoterId];
     const attendanceId = existing?.id || selectedDate;
     const docRef = doc(db, `promoters/${promoterId}/attendance`, attendanceId);
+    const promoter = promoters.find(p => p.id === promoterId);
 
     const defaultHours = status === 'present' ? DEFAULT_HOURS : (status === 'half-day' ? 2.5 : 0);
     const targetHours = status === 'absent' 
       ? 0 
       : (existing?.workedHours !== undefined && existing?.workedHours > 0 ? existing.workedHours : defaultHours);
-    const calculatedRate = targetHours * HOURLY_RATE;
+    const supervisorBonus = (status !== 'absent' && promoter?.isSupervisor) 
+      ? (promoter.supervisorBonus ?? 30) 
+      : 0;
+    const calculatedRate = (targetHours * HOURLY_RATE) + supervisorBonus;
 
     try {
       if (existing && existing.status === status) {
@@ -87,6 +91,9 @@ export default function AttendanceTracker({
           return next;
         });
       } else {
+        const existingLoanedTo = existing?.loanedToTeam || null;
+        const existingLoanedFrom = existing?.loanedFromTeam || null;
+
         await setDoc(docRef, {
           promoterId,
           date: selectedDate,
@@ -94,7 +101,10 @@ export default function AttendanceTracker({
           paymentStatus: existing?.paymentStatus || 'pending',
           dailyRate: calculatedRate,
           workedHours: targetHours,
+          supervisorBonus: supervisorBonus,
           isLoaned: existing?.isLoaned ?? false,
+          loanedToTeam: existingLoanedTo,
+          loanedFromTeam: existingLoanedFrom,
           recordedAt: existing?.recordedAt || new Date().toISOString()
         });
         setInputHours(prev => {
@@ -119,17 +129,31 @@ export default function AttendanceTracker({
     }
   };
 
+  const getDefaultDestinationTeam = (promoterTeam?: string) => {
+    const homeTeam = promoterTeam || 'flash';
+    const otherTeam = teamsList.find(t => t.id !== homeTeam);
+    return otherTeam?.id || (homeTeam === 'flash' ? 'rapidao' : 'flash');
+  };
+
   const toggleLoaned = async (promoterId: string, isLoaned: boolean) => {
     const existing = attendanceData[promoterId];
     const attendanceId = existing?.id || selectedDate;
     const docRef = doc(db, `promoters/${promoterId}/attendance`, attendanceId);
+    const promoter = promoters.find(p => p.id === promoterId);
+    const homeTeam = promoter?.team || 'flash';
+    const destinationTeam = isLoaned ? (existing?.loanedToTeam || getDefaultDestinationTeam(homeTeam)) : null;
 
     try {
       if (existing) {
-        await updateDoc(docRef, { isLoaned });
+        await updateDoc(docRef, { 
+          isLoaned,
+          loanedToTeam: destinationTeam,
+          loanedFromTeam: isLoaned ? homeTeam : null
+        });
       } else {
         const defaultHours = DEFAULT_HOURS;
-        const calculatedRate = defaultHours * HOURLY_RATE;
+        const supervisorBonus = promoter?.isSupervisor ? (promoter.supervisorBonus ?? 30) : 0;
+        const calculatedRate = (defaultHours * HOURLY_RATE) + supervisorBonus;
         await setDoc(docRef, {
           promoterId,
           date: selectedDate,
@@ -137,7 +161,47 @@ export default function AttendanceTracker({
           paymentStatus: 'pending',
           dailyRate: calculatedRate,
           workedHours: defaultHours,
+          supervisorBonus,
           isLoaned,
+          loanedToTeam: destinationTeam,
+          loanedFromTeam: isLoaned ? homeTeam : null,
+          recordedAt: new Date().toISOString()
+        });
+      }
+    } catch (err) {
+      handleFirestoreError(err, OperationType.WRITE, `promoters/${promoterId}/attendance`);
+    }
+  };
+
+  const changeLoanedTeam = async (promoterId: string, targetTeamId: string) => {
+    const existing = attendanceData[promoterId];
+    const attendanceId = existing?.id || selectedDate;
+    const docRef = doc(db, `promoters/${promoterId}/attendance`, attendanceId);
+    const promoter = promoters.find(p => p.id === promoterId);
+    const homeTeam = promoter?.team || 'flash';
+
+    try {
+      if (existing) {
+        await updateDoc(docRef, { 
+          isLoaned: true,
+          loanedToTeam: targetTeamId,
+          loanedFromTeam: existing.loanedFromTeam || homeTeam
+        });
+      } else {
+        const defaultHours = DEFAULT_HOURS;
+        const supervisorBonus = promoter?.isSupervisor ? (promoter.supervisorBonus ?? 30) : 0;
+        const calculatedRate = (defaultHours * HOURLY_RATE) + supervisorBonus;
+        await setDoc(docRef, {
+          promoterId,
+          date: selectedDate,
+          status: 'present',
+          paymentStatus: 'pending',
+          dailyRate: calculatedRate,
+          workedHours: defaultHours,
+          supervisorBonus,
+          isLoaned: true,
+          loanedToTeam: targetTeamId,
+          loanedFromTeam: homeTeam,
           recordedAt: new Date().toISOString()
         });
       }
@@ -150,18 +214,23 @@ export default function AttendanceTracker({
     const existing = attendanceData[promoterId];
     const attendanceId = existing?.id || selectedDate;
     const docRef = doc(db, `promoters/${promoterId}/attendance`, attendanceId);
+    const promoter = promoters.find(p => p.id === promoterId);
 
     const cleanHours = Math.max(0, Math.min(24, isNaN(hours) ? 0 : hours));
-    const calculatedRate = cleanHours * HOURLY_RATE;
     const calculatedStatus: Attendance['status'] = cleanHours >= DEFAULT_HOURS 
       ? 'present' 
       : (cleanHours > 0 ? 'half-day' : 'absent');
+    const supervisorBonus = (calculatedStatus !== 'absent' && promoter?.isSupervisor) 
+      ? (promoter.supervisorBonus ?? 30) 
+      : 0;
+    const calculatedRate = (cleanHours * HOURLY_RATE) + supervisorBonus;
 
     try {
       if (existing) {
         await updateDoc(docRef, { 
           workedHours: cleanHours,
           dailyRate: calculatedRate,
+          supervisorBonus,
           status: calculatedStatus
         });
       } else {
@@ -172,7 +241,10 @@ export default function AttendanceTracker({
           paymentStatus: 'pending',
           dailyRate: calculatedRate,
           workedHours: cleanHours,
+          supervisorBonus,
           isLoaned: false,
+          loanedToTeam: null,
+          loanedFromTeam: null,
           recordedAt: new Date().toISOString()
         });
       }
@@ -222,9 +294,12 @@ export default function AttendanceTracker({
         const h = att.workedHours !== undefined ? att.workedHours : (att.status === 'present' ? DEFAULT_HOURS : (att.status === 'half-day' ? 2.5 : 0));
         totalHours += h;
         if (att.isLoaned) loaned++;
+        const supervisorDailyBonus = (att.status !== 'absent' && p.isSupervisor) ? (p.supervisorBonus ?? 30) : 0;
         const pay = att.status === 'absent'
           ? 0
-          : (att.workedHours !== undefined ? att.workedHours * HOURLY_RATE : (att.dailyRate !== undefined ? att.dailyRate : (h * HOURLY_RATE)));
+          : (att.dailyRate !== undefined && Number(att.dailyRate) > 0 
+              ? Number(att.dailyRate) 
+              : ((att.workedHours !== undefined ? Number(att.workedHours) : h) * HOURLY_RATE + supervisorDailyBonus));
         totalAmount += pay;
       }
     });
@@ -431,7 +506,12 @@ export default function AttendanceTracker({
                         : (attendance.status === 'present' ? DEFAULT_HOURS : (attendance.status === 'half-day' ? 2.5 : 0)))
                     : null);
 
-              const calculatedPay = effectiveHours !== null ? effectiveHours * HOURLY_RATE : null;
+              const supervisorDailyBonus = (attendance?.status !== 'absent' && promoter.isSupervisor) ? (promoter.supervisorBonus ?? 30) : 0;
+              const calculatedPay = attendance?.status === 'absent'
+                ? 0
+                : (attendance?.dailyRate !== undefined && Number(attendance.dailyRate) > 0
+                    ? Number(attendance.dailyRate)
+                    : (effectiveHours !== null ? (effectiveHours > 0 ? (effectiveHours * HOURLY_RATE + supervisorDailyBonus) : 0) : null));
 
               return (
                 <tr key={promoter.id} className="hover:bg-zinc-50/50 transition-colors group">
@@ -450,10 +530,15 @@ export default function AttendanceTracker({
                             <span>{teamDisplay.icon}</span>
                             <span>{teamDisplay.name}</span>
                           </span>
+                          {promoter.isSupervisor && (
+                            <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[9px] font-extrabold uppercase tracking-wider bg-amber-100 text-amber-900 border border-amber-300 shadow-2xs">
+                              <span>⭐</span> Supervisora (+R$ {(promoter.supervisorBonus ?? 30).toFixed(2)})
+                            </span>
+                          )}
                           {attendance?.isLoaned && (
-                            <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[9px] font-extrabold uppercase tracking-wider bg-purple-100 text-purple-800 border border-purple-200">
+                            <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[9px] font-extrabold uppercase tracking-wider bg-purple-100 text-purple-800 border border-purple-200 shadow-2xs">
                               <ArrowRightLeft size={10} />
-                              Emprestado
+                              Emprestado ➔ {getTeamDisplay(attendance.loanedToTeam || getDefaultDestinationTeam(promoter.team), teamsList).name}
                             </span>
                           )}
                         </div>
@@ -602,24 +687,47 @@ export default function AttendanceTracker({
                     )}
                   </td>
 
-                  {/* Loaned Checkbox */}
+                  {/* Loaned Checkbox & Destination Team Selection */}
                   <td className="px-6 py-4 text-center">
-                    <label className={`inline-flex items-center gap-2 px-3 py-1.5 rounded-xl border transition-all cursor-pointer select-none ${
-                      attendance?.isLoaned
-                        ? 'bg-purple-50 text-purple-700 border-purple-200 font-bold shadow-2xs'
-                        : 'bg-zinc-50 text-zinc-500 border-zinc-200 hover:bg-zinc-100 font-medium'
-                    } ${readOnly ? 'opacity-50 pointer-events-none' : ''}`}>
-                      <input 
-                        type="checkbox"
-                        disabled={readOnly}
-                        checked={Boolean(attendance?.isLoaned)}
-                        onChange={(e) => toggleLoaned(promoter.id, e.target.checked)}
-                        className="h-4 w-4 rounded border-zinc-300 text-purple-600 focus:ring-purple-500 cursor-pointer"
-                      />
-                      <span className="text-xs">
-                        {attendance?.isLoaned ? 'Sim (Emprestado)' : 'Não'}
-                      </span>
-                    </label>
+                    <div className="flex flex-col items-center gap-1.5">
+                      <label className={`inline-flex items-center gap-2 px-3 py-1.5 rounded-xl border transition-all cursor-pointer select-none ${
+                        attendance?.isLoaned
+                          ? 'bg-purple-100 text-purple-800 border-purple-300 font-bold shadow-2xs'
+                          : 'bg-zinc-50 text-zinc-500 border-zinc-200 hover:bg-zinc-100 font-medium'
+                      } ${readOnly ? 'opacity-50 pointer-events-none' : ''}`}>
+                        <input 
+                          type="checkbox"
+                          disabled={readOnly}
+                          checked={Boolean(attendance?.isLoaned)}
+                          onChange={(e) => toggleLoaned(promoter.id, e.target.checked)}
+                          className="h-4 w-4 rounded border-zinc-300 text-purple-600 focus:ring-purple-500 cursor-pointer"
+                        />
+                        <span className="text-xs">
+                          {attendance?.isLoaned ? 'Sim (Emprestado)' : 'Não'}
+                        </span>
+                      </label>
+
+                      {attendance?.isLoaned && (
+                        <div className="flex items-center gap-1 bg-purple-50 px-2 py-1 rounded-lg border border-purple-200 shadow-2xs">
+                          <span className="text-[10px] font-black text-purple-700 uppercase tracking-wider">Para:</span>
+                          <select
+                            disabled={readOnly}
+                            value={attendance.loanedToTeam || getDefaultDestinationTeam(promoter.team)}
+                            onChange={(e) => changeLoanedTeam(promoter.id, e.target.value)}
+                            className="text-[11px] font-bold bg-white text-purple-900 border border-purple-300 rounded px-1.5 py-0.5 shadow-2xs focus:outline-none focus:ring-1 focus:ring-purple-500 cursor-pointer"
+                            title="Selecione a equipe de destino onde este valor será calculado em adiantamento"
+                          >
+                            {teamsList
+                              .filter(t => t.id !== (promoter.team || 'flash'))
+                              .map(t => (
+                                <option key={t.id} value={t.id}>
+                                  {t.icon || '👥'} {t.name}
+                                </option>
+                              ))}
+                          </select>
+                        </div>
+                      )}
+                    </div>
                   </td>
 
                   {/* Admin Only: Payment Status */}

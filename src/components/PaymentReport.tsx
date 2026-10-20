@@ -8,7 +8,7 @@ import { Copy, CheckCircle2, LayoutDashboard, Clock, Wallet, DollarSign, Calenda
 import { db } from '../lib/firebase';
 import { collection, query, onSnapshot, orderBy } from 'firebase/firestore';
 import { Promoter, Advance } from '../types';
-import { formatCurrency } from '../lib/utils';
+import { formatCurrency, formatDate, getStartOfWeekSaoPaulo, getSaoPauloDate } from '../lib/utils';
 
 interface PaymentReportProps {
   promoters: Promoter[];
@@ -63,19 +63,16 @@ export default function PaymentReport({ promoters }: PaymentReportProps) {
     
     const totalPaid = paidAdvances.reduce((acc, a) => acc + a.amount, 0);
     
-    const now = new Date();
+    const now = getSaoPauloDate();
     
-    // Hoje
-    const startOfToday = new Date(now);
-    startOfToday.setHours(0, 0, 0, 0);
+    // Hoje no horário de São Paulo
+    const todayStr = formatDate(now);
     const todayTotal = paidAdvances
-      .filter(a => new Date(a.date + 'T12:00:00') >= startOfToday)
+      .filter(a => a.date === todayStr)
       .reduce((acc, a) => acc + a.amount, 0);
 
-    // Esta Semana (desde domingo)
-    const currentWeekStart = new Date(now);
-    currentWeekStart.setDate(now.getDate() - now.getDay());
-    currentWeekStart.setHours(0, 0, 0, 0);
+    // Esta Semana (desde domingo no fuso de São Paulo)
+    const currentWeekStart = getStartOfWeekSaoPaulo(now);
     
     const weekTotal = paidAdvances
       .filter(a => new Date(a.date + 'T12:00:00') >= currentWeekStart)
@@ -109,12 +106,9 @@ export default function PaymentReport({ promoters }: PaymentReportProps) {
     paidAdvances.forEach(adv => {
       const d = new Date(adv.date + 'T12:00:00');
       
-      // Weekly grouping
-      const day = d.getDay();
-      const diff = d.getDate() - day;
-      const weekStartObj = new Date(d);
-      weekStartObj.setDate(diff);
-      const weekStart = weekStartObj.toISOString().split('T')[0];
+      // Weekly grouping usando fuso de São Paulo
+      const weekStartObj = getStartOfWeekSaoPaulo(d);
+      const weekStart = formatDate(weekStartObj);
       
       // Monthly grouping
       const [year, month] = adv.date.split('-');

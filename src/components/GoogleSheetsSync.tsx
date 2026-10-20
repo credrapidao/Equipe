@@ -122,9 +122,13 @@ export default function GoogleSheetsSync({
 
       const totalDiarias = promoterAttendance.reduce((sum, a) => {
         if (a.status === 'absent') return sum;
+        if (a.dailyRate !== undefined && Number(a.dailyRate) > 0) return sum + Number(a.dailyRate);
+        const supervisorBonus = a.supervisorBonus !== undefined 
+          ? Number(a.supervisorBonus) 
+          : (p.isSupervisor ? Number(p.supervisorBonus ?? 30) : 0);
         const val = a.workedHours !== undefined 
-          ? a.workedHours * 20 
-          : (a.status === 'half-day' ? 50 : (a.dailyRate !== undefined ? a.dailyRate : (p.defaultDailyRate || 100)));
+          ? (Number(a.workedHours) * 20) + (Number(a.workedHours) > 0 ? supervisorBonus : 0)
+          : (a.status === 'half-day' ? 50 + supervisorBonus : (p.defaultDailyRate || (100 + supervisorBonus)));
         return sum + val;
       }, 0);
 
@@ -134,10 +138,12 @@ export default function GoogleSheetsSync({
 
       const saldoLiquido = totalDiarias - totalAdiantamentos;
 
+      const teamName = p.team === 'rapidao' ? 'Time Rapidão' : (p.team === 'start' || p.team === 'start-credito' ? 'Time Start' : 'Time Flash');
+
       return [
         p.name,
         p.document,
-        p.team === 'rapidao' ? 'Time Rapidão' : 'Time Flash',
+        teamName,
         p.pixKey,
         p.pixKeyType,
         daysWorked,
@@ -166,16 +172,23 @@ export default function GoogleSheetsSync({
       const statusText = a.status === 'present' ? 'Presente' : a.status === 'half-day' ? 'Meio-período' : 'Ausente';
       const paymentStatusText = a.paymentStatus === 'paid' ? 'Pago' : 'Pendente';
       const promoterName = promoter ? promoter.name : 'Promotor Excluído';
+      const supervisorBonus = a.supervisorBonus !== undefined 
+        ? Number(a.supervisorBonus) 
+        : (promoter?.isSupervisor ? Number(promoter.supervisorBonus ?? 30) : 0);
       const value = a.status === 'absent' 
         ? 0 
-        : (a.workedHours !== undefined 
-            ? a.workedHours * 20 
-            : (a.status === 'half-day' ? 50 : (a.dailyRate !== undefined ? a.dailyRate : (promoter?.defaultDailyRate || 100))));
+        : (a.dailyRate !== undefined && Number(a.dailyRate) > 0 
+            ? Number(a.dailyRate) 
+            : (a.workedHours !== undefined 
+                ? (Number(a.workedHours) * 20) + (Number(a.workedHours) > 0 ? supervisorBonus : 0)
+                : (a.status === 'half-day' ? 50 + supervisorBonus : (promoter?.defaultDailyRate || (100 + supervisorBonus)))));
+
+      const teamName = promoter?.team === 'rapidao' ? 'Time Rapidão' : (promoter?.team === 'start' || promoter?.team === 'start-credito' ? 'Time Start' : 'Time Flash');
 
       return [
         formatToBrazilianDate(a.date),
         promoterName,
-        promoter?.team === 'rapidao' ? 'Time Rapidão' : 'Time Flash',
+        teamName,
         statusText,
         value,
         paymentStatusText

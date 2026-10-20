@@ -31,22 +31,33 @@ export default function PromoterModal({ isOpen, onClose, editingPromoter, teams:
     phoneNumber: '',
     defaultDailyRate: 100,
     active: true,
-    team: 'flash' as string
+    team: 'flash' as string,
+    isSupervisor: false,
+    supervisorBonus: 30,
+    supervisorTeam: 'flash'
   });
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
     if (editingPromoter) {
+      const isKnownSupervisor = 
+        Boolean(editingPromoter.isSupervisor) || 
+        editingPromoter.name.toLowerCase().includes('rita de cassia') || 
+        editingPromoter.name.toLowerCase().includes('terezinha monteiro');
+
       setFormData({
         name: editingPromoter.name,
         document: editingPromoter.document,
         pixKey: editingPromoter.pixKey,
         pixKeyType: editingPromoter.pixKeyType,
         phoneNumber: editingPromoter.phoneNumber || '',
-        defaultDailyRate: editingPromoter.defaultDailyRate || 100,
+        defaultDailyRate: editingPromoter.defaultDailyRate || (isKnownSupervisor ? 130 : 100),
         active: editingPromoter.active,
-        team: editingPromoter.team || 'flash'
+        team: editingPromoter.team || 'flash',
+        isSupervisor: isKnownSupervisor,
+        supervisorBonus: editingPromoter.supervisorBonus ?? 30,
+        supervisorTeam: editingPromoter.supervisorTeam || editingPromoter.team || 'flash'
       });
     } else {
       setFormData({
@@ -57,7 +68,10 @@ export default function PromoterModal({ isOpen, onClose, editingPromoter, teams:
         phoneNumber: '',
         defaultDailyRate: 100,
         active: true,
-        team: 'flash'
+        team: 'flash',
+        isSupervisor: false,
+        supervisorBonus: 30,
+        supervisorTeam: 'flash'
       });
     }
   }, [editingPromoter, isOpen]);
@@ -144,9 +158,28 @@ export default function PromoterModal({ isOpen, onClose, editingPromoter, teams:
                 required
                 type="text" 
                 value={formData.name}
-                onChange={e => setFormData({...formData, name: e.target.value})}
+                onChange={e => {
+                  const val = e.target.value;
+                  const isRitaOrTerezinha = 
+                    val.toLowerCase().includes('rita de cassia') || 
+                    val.toLowerCase().includes('terezinha monteiro');
+                  
+                  if (isRitaOrTerezinha && !formData.isSupervisor) {
+                    setFormData(prev => ({
+                      ...prev,
+                      name: val,
+                      isSupervisor: true,
+                      supervisorBonus: 30,
+                      defaultDailyRate: 130,
+                      team: val.toLowerCase().includes('rita de cassia') ? 'rapidao' : prev.team,
+                      supervisorTeam: val.toLowerCase().includes('rita de cassia') ? 'rapidao' : prev.team
+                    }));
+                  } else {
+                    setFormData(prev => ({ ...prev, name: val }));
+                  }
+                }}
                 className="w-full rounded-xl border border-zinc-200 bg-zinc-50 px-4 py-2.5 text-sm focus:border-brand-lime focus:outline-none focus:ring-4 focus:ring-brand-lime/10 transition-all"
-                placeholder="Ex: João Silva"
+                placeholder="Ex: Rita de Cássia Pereira"
               />
             </div>
 
@@ -240,7 +273,14 @@ export default function PromoterModal({ isOpen, onClose, editingPromoter, teams:
                 <select 
                   required
                   value={formData.team}
-                  onChange={e => setFormData({...formData, team: e.target.value})}
+                  onChange={e => {
+                    const newTeam = e.target.value;
+                    setFormData(prev => ({
+                      ...prev,
+                      team: newTeam,
+                      supervisorTeam: prev.isSupervisor ? newTeam : prev.supervisorTeam
+                    }));
+                  }}
                   className="w-full rounded-xl border border-zinc-200 bg-zinc-50 px-4 py-2.5 text-sm focus:border-brand-lime focus:outline-none focus:ring-4 focus:ring-brand-lime/10 transition-all font-bold"
                 >
                   {teamsList.map(t => (
@@ -250,6 +290,100 @@ export default function PromoterModal({ isOpen, onClose, editingPromoter, teams:
                   ))}
                 </select>
               </div>
+            </div>
+
+            {/* Configuração de Supervisores em Equipe e Bônus Diário */}
+            <div className="rounded-2xl border border-amber-200 bg-amber-50/60 p-4 space-y-3.5 transition-all">
+              <div className="flex items-start justify-between gap-3">
+                <div className="flex items-start gap-2.5">
+                  <span className="text-xl leading-none mt-0.5">⭐</span>
+                  <div>
+                    <label htmlFor="isSupervisor" className="text-sm font-extrabold text-zinc-900 cursor-pointer flex items-center gap-1.5">
+                      Supervisor(a) de Equipe
+                    </label>
+                    <p className="text-xs text-zinc-600 mt-0.5">
+                      Define esta pessoa como supervisora e ativa o bônus diário nos registros de presença e relatórios.
+                    </p>
+                  </div>
+                </div>
+                <input 
+                  type="checkbox" 
+                  id="isSupervisor"
+                  checked={formData.isSupervisor}
+                  onChange={e => {
+                    const checked = e.target.checked;
+                    const bonus = formData.supervisorBonus || 30;
+                    setFormData(prev => ({
+                      ...prev,
+                      isSupervisor: checked,
+                      defaultDailyRate: checked ? 100 + bonus : (prev.defaultDailyRate === 130 ? 100 : prev.defaultDailyRate)
+                    }));
+                  }}
+                  className="h-5 w-5 rounded border-zinc-300 text-amber-600 focus:ring-amber-500 cursor-pointer mt-0.5"
+                />
+              </div>
+
+              {formData.isSupervisor && (
+                <div className="space-y-3 pt-3 border-t border-amber-200/80">
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                    <div className="space-y-1.5">
+                      <label className="text-xs font-bold uppercase tracking-wider text-amber-900 flex items-center gap-1">
+                        Bônus Diário de Supervisão
+                        <span className="text-zinc-500 font-normal lowercase">(R$/dia)</span>
+                      </label>
+                      <div className="relative">
+                        <span className="absolute left-3.5 top-1/2 -translate-y-1/2 text-zinc-500 font-bold text-xs">R$</span>
+                        <input 
+                          type="number" 
+                          min="0"
+                          step="1"
+                          value={formData.supervisorBonus}
+                          onChange={e => {
+                            const val = Number(e.target.value);
+                            setFormData(prev => ({ 
+                              ...prev, 
+                              supervisorBonus: val,
+                              defaultDailyRate: 100 + val
+                            }));
+                          }}
+                          className="w-full rounded-xl border border-amber-300 bg-white pl-9 pr-3 py-2 text-sm font-bold text-zinc-900 focus:border-amber-500 focus:outline-none focus:ring-2 focus:ring-amber-500/20"
+                          placeholder="30"
+                        />
+                      </div>
+                      <p className="text-[11px] text-amber-700">
+                        Rita e Terezinha: R$ 30,00/dia. Na Start ou outros times, defina quanto será o bônus.
+                      </p>
+                    </div>
+
+                    <div className="space-y-1.5">
+                      <label className="text-xs font-bold uppercase tracking-wider text-amber-900">
+                        Equipe Supervisionada
+                      </label>
+                      <select 
+                        value={formData.supervisorTeam || formData.team}
+                        onChange={e => setFormData({ ...formData, supervisorTeam: e.target.value })}
+                        className="w-full rounded-xl border border-amber-300 bg-white px-3 py-2 text-sm font-bold text-zinc-900 focus:border-amber-500 focus:outline-none focus:ring-2 focus:ring-amber-500/20"
+                      >
+                        {teamsList.map(t => (
+                          <option key={t.id} value={t.id}>
+                            {t.icon || '👥'} {t.name}
+                          </option>
+                        ))}
+                      </select>
+                      <p className="text-[11px] text-amber-700">
+                        Equipe que fica sob a supervisão desta liderança.
+                      </p>
+                    </div>
+                  </div>
+
+                  <div className="flex items-center gap-2 p-2.5 rounded-xl bg-amber-100/70 border border-amber-200 text-xs text-amber-950 font-medium">
+                    <span>💡</span>
+                    <span>
+                      Diária com supervisão: <strong>R$ {(100 + Number(formData.supervisorBonus || 0)).toFixed(2)}</strong> (R$ 100,00 base + R$ {Number(formData.supervisorBonus || 0).toFixed(2)} bônus diário).
+                    </span>
+                  </div>
+                </div>
+              )}
             </div>
           </div>
 

@@ -4,25 +4,26 @@
  */
 
 import React, { useState, useEffect } from 'react';
-import { Wallet, Plus, Trash2, CheckCircle2, Clock, DollarSign, Copy, Check, PlusCircle, XCircle, Search, FileSpreadsheet, FileText, ChevronDown, Settings2, RotateCcw, Undo2, AlertTriangle } from 'lucide-react';
+import { Wallet, Plus, Trash2, CheckCircle2, Clock, DollarSign, Copy, Check, PlusCircle, XCircle, Search, FileSpreadsheet, FileText, ChevronDown, Settings2, RotateCcw, Undo2, AlertTriangle, ArrowRightLeft } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { db } from '../lib/firebase';
 import { collection, query, onSnapshot, addDoc, updateDoc, doc, deleteDoc, serverTimestamp, orderBy, where, limit, getDocs, writeBatch } from 'firebase/firestore';
-import { Promoter, Advance, OperationType } from '../types';
-import { handleFirestoreError, formatCurrency, formatDate } from '../lib/utils';
+import { Promoter, Advance, OperationType, Attendance } from '../types';
+import { handleFirestoreError, formatCurrency, formatDate, getStartOfWeekSaoPaulo, getTodaySaoPaulo } from '../lib/utils';
 import { exportPromoterAdvancesToExcel, exportPromoterAdvancesToCSV, exportBatchPaymentToExcel, exportBatchPaymentToCSV, BatchPaymentRow, roundCurrency } from '../lib/excelExport';
 import { BatchExportModal } from './BatchExportModal';
 import { useTeams, getTeamDisplay } from '../lib/teams';
 
 interface AdvanceManagerProps {
   promoters: Promoter[];
+  selectedTeam?: string;
   readOnly?: boolean;
 }
 
-export default function AdvanceManager({ promoters, readOnly }: AdvanceManagerProps) {
+export default function AdvanceManager({ promoters, selectedTeam = 'all', readOnly }: AdvanceManagerProps) {
+  const { teams } = useTeams();
   const [advancesMap, setAdvancesMap] = useState<Record<string, Advance[]>>({});
-  const [weeklyPending, setWeeklyPending] = useState<Record<string, number>>({});
-  const [weeklyPaidAtt, setWeeklyPaidAtt] = useState<Record<string, number>>({});
+  const [attendanceMap, setAttendanceMap] = useState<Record<string, Attendance[]>>({});
   const [isAdding, setIsAdding] = useState(false);
   const [selectedPromoterId, setSelectedPromoterId] = useState('');
   const [amount, setAmount] = useState('');
@@ -40,81 +41,161 @@ export default function AdvanceManager({ promoters, readOnly }: AdvanceManagerPr
   const [showHistoryExportMenu, setShowHistoryExportMenu] = useState(false);
   const [showConfigModal, setShowConfigModal] = useState(false);
 
-  // 1. DATA FLATTENING
-  const advances: Advance[] = React.useMemo(() => {
-    const list = Object.values(advancesMap).flat() as Advance[];
-    const filtered = list.filter(a => 
-      (a.promoterName?.toLowerCase() || '').includes(searchTerm.toLowerCase()) ||
-      (a.notes?.toLowerCase() || '').includes(searchTerm.toLowerCase())
-    );
-    return filtered.sort((a, b) => b.date.localeCompare(a.date));
-  }, [advancesMap, searchTerm]);
-
-  // 2. LOGIC HELPERS
-  const getAttendanceRecordValue = (att: { status?: string; dailyRate?: number; workedHours?: number }) => {
-    if (att.status === 'absent') return 0;
-    // O valor por hora é 20,00: se alguém trabalhar meia hora (0.5) ganha 10,00
-    if (att.workedHours !== undefined) return att.workedHours * 20;
-    if (att.status === 'half-day') return 50;
-    if (att.dailyRate !== undefined) return att.dailyRate;
-    return 100;
+  // 1. HELPER: Determine if an attendance belongs to the selected team (including loaned promoters)
+  const isAttendanceForTeam = (att: Attendance, promoter: Promoter, teamId?: string) => {
+    if (!teamId || teamId === 'all') return true;
+    if (att.isLoaned) {
+      // Se emprestado, pertence à equipe de destino para cálculo de adiantamento
+      return att.loanedToTeam === teamId;
+    }
+    const homeTeam = promoter.team || 'flash';
+    return homeTeam === teamId;
   };
 
-  const getPendingBalance = (promoterId: string) => {
-    const totalAttendance = weeklyPending[promoterId] || 0;
-    const paidAttendance = weeklyPaidAtt[promoterId] || 0;
+  // HELPER: Determine if an advance belongs to the selected team
+  const isAdvanceForTeam = (adv: Advance, promoter: Promoter, teamId?: string) => {
+    if (!teamId || teamId === 'all') return true;
+    if (adv.team) {
+      return adv.team === teamId;
+    }
+    const homeTeam = promoter.team || 'flash';
+    return homeTeam === teamId;
+  };
 
-    const totalPendingAdvances = (advancesMap[promoterId] || [])
+  // HELPER: Value per shift / hour (R$ 20,00/h, meia hora 0.5 = R$ 10,00) + bônus de supervisão
+  const getAttendanceRecordValue = (att: { status?: string; dailyRate?: number; workedHours?: number; supervisorBonus?: number; promoterId?: string }) => {
+    if (att.status === 'absent') return 0;
+    const promoter = att.promoterId ? promoters.find(p => p.id === att.promoterId) : undefined;
+    const supervisorBonus = att.supervisorBonus !== undefined 
+      ? Number(att.supervisorBonus) 
+      : (promoter?.isSupervisor ? Number(promoter.supervisorBonus ?? 30) : 0);
+
+    // 1. Se o valor da diária está expressamente gravado no documento
+    if (att.dailyRate !== undefined && Number(att.dailyRate) > 0) {
+      const rec = Number(att.dailyRate);
+      // Se for supervisora e a diária foi salva com valor base (<= 100) sem o bônus, somar o bônus
+      if (promoter?.isSupervisor && att.supervisorBonus === undefined && rec <= 100) {
+        return rec + supervisorBonus;
+      }
+      return rec;
+    }
+
+    // 2. O valor por hora é 20,00: se alguém trabalhar meia hora (0.5) ganha 10,00 (+ bônus de supervisão se aplicável)
+    if (att.workedHours !== undefined) {
+      return (Number(att.workedHours) * 20) + (Number(att.workedHours) > 0 ? supervisorBonus : 0);
+    }
+    if (att.status === 'half-day') return 50 + supervisorBonus;
+    return 100 + supervisorBonus;
+  };
+
+  // Promotores visíveis nesta equipe (inclui promotores da própria equipe E promotores emprestados para esta equipe)
+  const visiblePromoters = React.useMemo(() => {
+    if (!selectedTeam || selectedTeam === 'all') return promoters;
+    return promoters.filter(p => {
+      const homeTeam = p.team || 'flash';
+      if (homeTeam === selectedTeam) return true;
+      // Promotor de outra equipe que foi emprestado para esta equipe
+      const promoterAtt = attendanceMap[p.id] || [];
+      const hasLoanedToTeam = promoterAtt.some(att => att.isLoaned && att.loanedToTeam === selectedTeam);
+      if (hasLoanedToTeam) return true;
+      const promoterAdv = advancesMap[p.id] || [];
+      return promoterAdv.some(adv => adv.team === selectedTeam);
+    });
+  }, [promoters, selectedTeam, attendanceMap, advancesMap]);
+
+  // 2. DATA FLATTENING
+  const advances: Advance[] = React.useMemo(() => {
+    const list = Object.values(advancesMap).flat() as Advance[];
+    const filtered = list.filter(a => {
+      const promoter = promoters.find(p => p.id === a.promoterId);
+      if (selectedTeam && selectedTeam !== 'all') {
+        if (!promoter) return false;
+        if (!isAdvanceForTeam(a, promoter, selectedTeam)) return false;
+      }
+      return (
+        (a.promoterName?.toLowerCase() || '').includes(searchTerm.toLowerCase()) ||
+        (a.notes?.toLowerCase() || '').includes(searchTerm.toLowerCase())
+      );
+    });
+    return filtered.sort((a, b) => b.date.localeCompare(a.date));
+  }, [advancesMap, searchTerm, selectedTeam, promoters]);
+
+  // 3. BALANCE CALCULATION FOR PROMOTER IN THIS TEAM
+  const getPendingBalance = (promoterId: string) => {
+    const promoter = promoters.find(p => p.id === promoterId);
+    if (!promoter) return 0;
+    const promoterAtt = attendanceMap[promoterId] || [];
+    const promoterAdv = advancesMap[promoterId] || [];
+
+    const relevantAtt = promoterAtt.filter(att => 
+      att.status !== 'absent' && isAttendanceForTeam(att, promoter, selectedTeam)
+    );
+
+    const relevantAdv = promoterAdv.filter(adv => 
+      isAdvanceForTeam(adv, promoter, selectedTeam)
+    );
+
+    let pendingAttendance = 0;
+    let paidAttendance = 0;
+
+    relevantAtt.forEach(att => {
+      const val = getAttendanceRecordValue(att);
+      if (att.paymentStatus === 'paid') {
+        paidAttendance += val;
+      } else {
+        pendingAttendance += val;
+      }
+    });
+
+    const totalPendingAdvances = relevantAdv
       .filter(a => a.status === 'pending')
       .reduce((sum, a) => sum + a.amount, 0);
 
-    const totalPaidAdvances = (advancesMap[promoterId] || [])
+    const totalPaidAdvances = relevantAdv
       .filter(a => a.status === 'paid')
       .reduce((sum, a) => sum + a.amount, 0);
 
     const unclearedPaidAdvances = Math.max(0, totalPaidAdvances - paidAttendance);
 
-    return Math.max(0, Math.round((totalAttendance - totalPendingAdvances - unclearedPaidAdvances) * 100) / 100);
+    return Math.max(0, Math.round((pendingAttendance - totalPendingAdvances - unclearedPaidAdvances) * 100) / 100);
   };
 
   const getTotalPaid = (promoterId: string) => {
+    const promoter = promoters.find(p => p.id === promoterId);
+    if (!promoter) return 0;
     return (advancesMap[promoterId] || [])
-      .filter(a => a.status === 'paid')
+      .filter(a => a.status === 'paid' && isAdvanceForTeam(a, promoter, selectedTeam))
       .reduce((sum, a) => sum + a.amount, 0);
   };
 
   const getWeeklyTotalPaid = (promoterId: string) => {
-    const now = new Date();
-    const currentWeekStart = new Date(now);
-    currentWeekStart.setDate(now.getDate() - now.getDay());
-    currentWeekStart.setHours(0, 0, 0, 0);
+    const promoter = promoters.find(p => p.id === promoterId);
+    if (!promoter) return 0;
+    const currentWeekStart = getStartOfWeekSaoPaulo();
 
     return (advancesMap[promoterId] || [])
-      .filter(a => a.status === 'paid' && new Date(a.date + 'T12:00:00') >= currentWeekStart)
+      .filter(a => a.status === 'paid' && isAdvanceForTeam(a, promoter, selectedTeam) && new Date(a.date + 'T12:00:00') >= currentWeekStart)
       .reduce((sum, a) => sum + a.amount, 0);
   };
 
   const totalsSummary = React.useMemo(() => {
-    const pendingReg = promoters.reduce((acc, p) => acc + getPendingBalance(p.id), 0);
+    const pendingReg = visiblePromoters.reduce((acc, p) => acc + getPendingBalance(p.id), 0);
     const registered = advances.filter(a => a.status === 'pending').reduce((acc, a) => acc + a.amount, 0);
     const paid = advances.filter(a => a.status === 'paid').reduce((acc, a) => acc + a.amount, 0);
     
-    const now = new Date();
-    const startOfWeek = new Date(now.setDate(now.getDate() - now.getDay()));
-    startOfWeek.setHours(0,0,0,0);
+    const startOfWeek = getStartOfWeekSaoPaulo();
     
     const weekTotal = advances
       .filter(a => new Date(a.date + 'T12:00:00') >= startOfWeek)
       .reduce((acc, a) => acc + a.amount, 0);
 
     return { pendingReg, registered, paid, weekTotal };
-  }, [promoters, advances, weeklyPending, weeklyPaidAtt]);
+  }, [visiblePromoters, advances, selectedTeam, attendanceMap, advancesMap, promoters]);
 
   useEffect(() => {
     const unsubscribes: (() => void)[] = [];
     setAdvancesMap({});
-    setWeeklyPending({});
-    setWeeklyPaidAtt({});
+    setAttendanceMap({});
 
     promoters.forEach(promoter => {
       const q = query(
@@ -133,23 +214,8 @@ export default function AdvanceManager({ promoters, readOnly }: AdvanceManagerPr
       unsubscribes.push(unsubAdvances);
 
       const unsubAtt = onSnapshot(collection(db, 'promoters', promoter.id, 'attendance'), (snapshot) => {
-        let pendingTotal = 0;
-        let paidTotal = 0;
-
-        snapshot.docs.forEach(doc => {
-          const data = doc.data();
-          if (data.status === 'absent') return;
-          const val = getAttendanceRecordValue(data);
-
-          if (data.paymentStatus === 'paid') {
-            paidTotal += val;
-          } else {
-            pendingTotal += val;
-          }
-        });
-
-        setWeeklyPending(prev => ({ ...prev, [promoter.id]: pendingTotal }));
-        setWeeklyPaidAtt(prev => ({ ...prev, [promoter.id]: paidTotal }));
+        const data = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as Attendance));
+        setAttendanceMap(prev => ({ ...prev, [promoter.id]: data }));
       });
       unsubscribes.push(unsubAtt);
     });
@@ -164,13 +230,20 @@ export default function AdvanceManager({ promoters, readOnly }: AdvanceManagerPr
     setProcessing(true);
     try {
       const promoter = promoters.find(p => p.id === selectedPromoterId);
+      const homeTeam = promoter?.team || 'flash';
+      const isLoanedIn = Boolean(selectedTeam && selectedTeam !== 'all' && homeTeam !== selectedTeam);
+      const targetTeam = selectedTeam !== 'all' ? selectedTeam : homeTeam;
+
       await addDoc(collection(db, 'promoters', selectedPromoterId, 'advances'), {
         promoterId: selectedPromoterId,
         promoterName: promoter?.name || '---',
         amount: parseFloat(amount),
         date: date,
         status: 'pending',
-        notes: notes,
+        team: targetTeam,
+        isLoaned: isLoanedIn,
+        loanedFromTeam: isLoanedIn ? homeTeam : null,
+        notes: notes || (isLoanedIn ? `Adiantamento Time ${getTeamDisplay(targetTeam, teams).name} (Emprestado de ${getTeamDisplay(homeTeam, teams).name})` : ''),
         createdAt: serverTimestamp()
       });
 
@@ -192,16 +265,20 @@ export default function AdvanceManager({ promoters, readOnly }: AdvanceManagerPr
       const advanceRef = doc(db, 'promoters', advance.promoterId, 'advances', advance.id);
       batch.update(advanceRef, { status: newStatus });
       
+      const promoter = promoters.find(p => p.id === advance.promoterId);
+      const targetTeam = advance.team || selectedTeam;
+
       const attendanceSnapshot = await getDocs(collection(db, 'promoters', advance.promoterId, 'attendance'));
       const attendanceDocs = attendanceSnapshot.docs
-        .map(doc => ({ id: doc.id, ...doc.data() } as any))
+        .map(doc => ({ id: doc.id, ...doc.data() } as Attendance))
+        .filter(att => !promoter || isAttendanceForTeam(att, promoter, targetTeam))
         .sort((a, b) => a.date.localeCompare(b.date));
       
       if (newStatus === 'paid') {
         let remainingToCover = advance.amount;
         for (const att of attendanceDocs) {
           if (remainingToCover <= 0.01) break;
-          if (att.paymentStatus !== 'paid') {
+          if (att.paymentStatus !== 'paid' && att.status !== 'absent') {
             const value = getAttendanceRecordValue(att);
             
             batch.update(doc(db, 'promoters', advance.promoterId, 'attendance', att.id), { 
@@ -298,7 +375,10 @@ export default function AdvanceManager({ promoters, readOnly }: AdvanceManagerPr
 
   const copyIndividual = (e: React.MouseEvent, promoter: Promoter, amount: number) => {
     e.stopPropagation();
-    const text = `NOME: ${promoter.name}\nCPF: ${promoter.document}\nPIX (${promoter.pixKeyType}): ${promoter.pixKey}\nVALOR: ${formatCurrency(amount)}`;
+    const homeTeam = promoter.team || 'flash';
+    const isLoanedIn = Boolean(selectedTeam && selectedTeam !== 'all' && homeTeam !== selectedTeam);
+    const loanedNote = isLoanedIn ? ` (Emprestado de ${getTeamDisplay(homeTeam, teams).name})` : '';
+    const text = `NOME: ${promoter.name}${loanedNote}\nCPF: ${promoter.document}\nPIX (${promoter.pixKeyType}): ${promoter.pixKey}\nVALOR: ${formatCurrency(amount)}`;
     navigator.clipboard.writeText(text).then(() => {
       setCopiedId(promoter.id);
       setTimeout(() => setCopiedId(null), 2000);
@@ -330,7 +410,11 @@ export default function AdvanceManager({ promoters, readOnly }: AdvanceManagerPr
     const net = getPendingBalance(promoterId);
     if (net < 0.01) return;
 
-    if (!window.confirm(`Deseja QUITAR o pagamento para ${promoter.name}?\nValor: ${formatCurrency(net)}`)) return;
+    const homeTeam = promoter.team || 'flash';
+    const isLoanedIn = Boolean(selectedTeam && selectedTeam !== 'all' && homeTeam !== selectedTeam);
+    const targetTeam = selectedTeam !== 'all' ? selectedTeam : homeTeam;
+
+    if (!window.confirm(`Deseja QUITAR o pagamento para ${promoter.name}${isLoanedIn ? ` (Emprestado de ${getTeamDisplay(homeTeam, teams).name})` : ''}?\nValor: ${formatCurrency(net)}`)) return;
 
     setProcessing(true);
     try {
@@ -344,20 +428,29 @@ export default function AdvanceManager({ promoters, readOnly }: AdvanceManagerPr
         amount: net,
         date: today,
         status: 'paid',
-        notes: 'Quitação Direta',
+        team: targetTeam,
+        isLoaned: isLoanedIn,
+        loanedFromTeam: isLoanedIn ? homeTeam : null,
+        notes: isLoanedIn ? `Quitação Direta (Emprestado de ${getTeamDisplay(homeTeam, teams).name})` : 'Quitação Direta de Saldo',
         createdAt: serverTimestamp()
       });
 
       const attendanceSnapshot = await getDocs(collection(db, 'promoters', promoter.id, 'attendance'));
-      attendanceSnapshot.docs.forEach(attDoc => {
-        const data = attDoc.data();
-        if (data.paymentStatus !== 'paid') {
-          batch.update(doc(db, 'promoters', promoter.id, 'attendance', attDoc.id), { 
-            paymentStatus: 'paid',
-            updatedAt: serverTimestamp()
-          });
-        }
-      });
+      const attendanceDocs = attendanceSnapshot.docs
+        .map(doc => ({ id: doc.id, ...doc.data() } as Attendance))
+        .filter(att => att.paymentStatus !== 'paid' && att.status !== 'absent' && isAttendanceForTeam(att, promoter, targetTeam))
+        .sort((a, b) => a.date.localeCompare(b.date));
+
+      let remainingToCover = net;
+      for (const att of attendanceDocs) {
+        if (remainingToCover <= 0.01) break;
+        const val = getAttendanceRecordValue(att);
+        batch.update(doc(db, 'promoters', promoter.id, 'attendance', att.id), { 
+          paymentStatus: 'paid',
+          updatedAt: serverTimestamp()
+        });
+        remainingToCover -= val;
+      }
 
       await batch.commit();
       alert('Pagamento quitado com sucesso!');
@@ -377,7 +470,11 @@ export default function AdvanceManager({ promoters, readOnly }: AdvanceManagerPr
     const net = getPendingBalance(promoterId);
     if (net < 0.01) return;
 
-    if (!window.confirm(`Deseja REGISTRAR a pendência para ${promoter.name}?\nValor: ${formatCurrency(net)}`)) return;
+    const homeTeam = promoter.team || 'flash';
+    const isLoanedIn = Boolean(selectedTeam && selectedTeam !== 'all' && homeTeam !== selectedTeam);
+    const targetTeam = selectedTeam !== 'all' ? selectedTeam : homeTeam;
+
+    if (!window.confirm(`Deseja REGISTRAR a pendência para ${promoter.name}${isLoanedIn ? ` (Emprestado de ${getTeamDisplay(homeTeam, teams).name})` : ''}?\nValor: ${formatCurrency(net)}`)) return;
 
     setProcessing(true);
     try {
@@ -388,7 +485,10 @@ export default function AdvanceManager({ promoters, readOnly }: AdvanceManagerPr
         amount: net,
         date: today,
         status: 'pending',
-        notes: 'Registro de Saldo Pendente',
+        team: targetTeam,
+        isLoaned: isLoanedIn,
+        loanedFromTeam: isLoanedIn ? homeTeam : null,
+        notes: isLoanedIn ? `Registro de Saldo (Emprestado de ${getTeamDisplay(homeTeam, teams).name})` : 'Registro de Saldo Pendente',
         createdAt: serverTimestamp()
       });
       alert('Pendente registrado! Agora ele aparece na lista para ser pago.');
@@ -403,7 +503,7 @@ export default function AdvanceManager({ promoters, readOnly }: AdvanceManagerPr
   const registerSelected = async (status: 'pending' | 'paid') => {
     if (selectedBalances.size === 0 || processing) return;
     
-    const candidates = promoters
+    const candidates = visiblePromoters
       .filter(p => selectedBalances.has(p.id))
       .map(p => ({ promoter: p, net: getPendingBalance(p.id) }))
       .filter(item => item.net >= 0.01);
@@ -424,6 +524,10 @@ export default function AdvanceManager({ promoters, readOnly }: AdvanceManagerPr
 
       // Usamos Promise.all para buscar todas as presenças em paralelo ANTES de commitar o batch
       await Promise.all(candidates.map(async ({ promoter, net }) => {
+        const homeTeam = promoter.team || 'flash';
+        const isLoanedIn = Boolean(selectedTeam && selectedTeam !== 'all' && homeTeam !== selectedTeam);
+        const targetTeam = selectedTeam !== 'all' ? selectedTeam : homeTeam;
+
         const newDocRef = doc(collection(db, 'promoters', promoter.id, 'advances'));
         batch.set(newDocRef, {
           promoterId: promoter.id,
@@ -431,14 +535,20 @@ export default function AdvanceManager({ promoters, readOnly }: AdvanceManagerPr
           amount: net,
           date: today,
           status: status,
-          notes: status === 'paid' ? 'Registro e Quitação em Lote' : 'Registro em Lote',
+          team: targetTeam,
+          isLoaned: isLoanedIn,
+          loanedFromTeam: isLoanedIn ? homeTeam : null,
+          notes: status === 'paid' 
+            ? (isLoanedIn ? `Registro e Quitação em Lote (Emprestado de ${getTeamDisplay(homeTeam, teams).name})` : 'Registro e Quitação em Lote')
+            : (isLoanedIn ? `Registro em Lote (Emprestado de ${getTeamDisplay(homeTeam, teams).name})` : 'Registro em Lote'),
           createdAt: serverTimestamp()
         });
 
         if (status === 'paid') {
           const attendanceSnapshot = await getDocs(collection(db, 'promoters', promoter.id, 'attendance'));
           attendanceSnapshot.docs.forEach(attDoc => {
-            if (attDoc.data().paymentStatus !== 'paid') {
+            const attData = attDoc.data() as Attendance;
+            if (attData.paymentStatus !== 'paid' && attData.status !== 'absent' && isAttendanceForTeam(attData, promoter, targetTeam)) {
               batch.update(doc(db, 'promoters', promoter.id, 'attendance', attDoc.id), { 
                 paymentStatus: 'paid',
                 updatedAt: serverTimestamp()
@@ -755,10 +865,18 @@ export default function AdvanceManager({ promoters, readOnly }: AdvanceManagerPr
   };
 
   const copyPendingSummary = () => {
-    const list = promoters
-      .map(p => ({ p, net: getPendingBalance(p.id) }))
+    const list = visiblePromoters
+      .map(p => {
+        const net = getPendingBalance(p.id);
+        const homeTeam = p.team || 'flash';
+        const isLoanedIn = Boolean(selectedTeam && selectedTeam !== 'all' && homeTeam !== selectedTeam);
+        return { p, net, isLoanedIn, homeTeam };
+      })
       .filter(i => i.net > 0.01)
-      .map(i => `NOME: ${i.p.name}\nCPF: ${i.p.document}\nPIX (${i.p.pixKeyType}): ${i.p.pixKey}\nVALOR: ${formatCurrency(i.net)}`)
+      .map(i => {
+        const loanedNote = i.isLoanedIn ? ` (Emprestado de ${getTeamDisplay(i.homeTeam, teams).name})` : '';
+        return `NOME: ${i.p.name}${loanedNote}\nCPF: ${i.p.document}\nPIX (${i.p.pixKeyType}): ${i.p.pixKey}\nVALOR: ${formatCurrency(i.net)}`;
+      })
       .join('\n\n---\n\n');
     
     if (list) {
@@ -772,12 +890,15 @@ export default function AdvanceManager({ promoters, readOnly }: AdvanceManagerPr
     const list: any[] = [];
     
     // 1. Attendance balances (unregistered)
-    promoters.forEach(p => {
+    visiblePromoters.forEach(p => {
       const net = getPendingBalance(p.id);
       const matchesSearch = (p.name?.toLowerCase() || '').includes(searchTerm.toLowerCase()) || 
                            (p.document || '').includes(searchTerm);
                            
       if (net >= 0.01 && matchesSearch && (p.active || net >= 0.01)) {
+        const homeTeam = p.team || 'flash';
+        const isLoanedIn = Boolean(selectedTeam && selectedTeam !== 'all' && homeTeam !== selectedTeam);
+
         list.push({
           id: `balance-${p.id}`,
           promoter: p,
@@ -785,7 +906,9 @@ export default function AdvanceManager({ promoters, readOnly }: AdvanceManagerPr
           amount: net,
           status: 'pending-reg',
           date: formatDate(new Date()),
-          type: 'balance'
+          type: 'balance',
+          isLoaned: isLoanedIn,
+          loanedFromTeam: isLoanedIn ? homeTeam : undefined
         });
       }
     });
@@ -799,6 +922,9 @@ export default function AdvanceManager({ promoters, readOnly }: AdvanceManagerPr
                              (promoter?.document || '').includes(searchTerm) ||
                              (a.notes?.toLowerCase() || '').includes(searchTerm.toLowerCase());
         if (matchesSearch) {
+          const homeTeam = promoter?.team || 'flash';
+          const isLoanedIn = Boolean(selectedTeam && selectedTeam !== 'all' && homeTeam !== selectedTeam);
+
           list.push({
             id: a.id,
             advance: a,
@@ -807,16 +933,17 @@ export default function AdvanceManager({ promoters, readOnly }: AdvanceManagerPr
             amount: a.amount,
             status: 'pending',
             date: a.date,
-            type: 'advance'
+            type: 'advance',
+            isLoaned: isLoanedIn || a.isLoaned,
+            loanedFromTeam: a.loanedFromTeam || (isLoanedIn ? homeTeam : undefined)
           });
         }
       });
 
     return list.sort((a, b) => b.date.localeCompare(a.date));
-  }, [promoters, advances, weeklyPending, weeklyPaidAtt, searchTerm]);
+  }, [visiblePromoters, advances, selectedTeam, attendanceMap, advancesMap, searchTerm, promoters]);
 
   // 3. MULTI-TEAM RESCUE / UNDO SYSTEM (DESFAZER QUITAÇÃO POR TIME)
-  const { teams } = useTeams();
   const [selectedUndoTeam, setSelectedUndoTeam] = useState<string>('all');
   const [isRevertingTeam, setIsRevertingTeam] = useState(false);
 
@@ -1042,9 +1169,15 @@ export default function AdvanceManager({ promoters, readOnly }: AdvanceManagerPr
                     className="w-full rounded-xl border border-zinc-200 bg-zinc-50 px-4 py-2.5 text-sm focus:border-brand-lime focus:outline-none focus:ring-4 focus:ring-brand-lime/10 transition-all font-bold"
                   >
                     <option value="">Selecionar...</option>
-                    {promoters.filter(p => p.active).map(p => (
-                      <option key={p.id} value={p.id}>{p.name}</option>
-                    ))}
+                    {visiblePromoters.filter(p => p.active || getPendingBalance(p.id) > 0).map(p => {
+                      const homeTeam = p.team || 'flash';
+                      const isLoanedIn = Boolean(selectedTeam && selectedTeam !== 'all' && homeTeam !== selectedTeam);
+                      return (
+                        <option key={p.id} value={p.id}>
+                          {p.name} {isLoanedIn ? `(Emprestado de ${getTeamDisplay(homeTeam, teams).name})` : ''}
+                        </option>
+                      );
+                    })}
                   </select>
                 </div>
                 <div className="space-y-1.5">
@@ -1300,10 +1433,20 @@ export default function AdvanceManager({ promoters, readOnly }: AdvanceManagerPr
                             {(item.promoter?.name || '??').split(' ').map((n: string) => n[0]).join('').substring(0, 2).toUpperCase()}
                           </div>
                           <div>
-                            <div className="font-bold text-zinc-900 leading-tight">{item.promoter?.name || '---'}</div>
-                            <div className="text-[10px] text-zinc-400 font-medium">
+                            <div className="flex items-center gap-2 flex-wrap">
+                              <span className="font-bold text-zinc-900 leading-tight">{item.promoter?.name || '---'}</span>
+                              {item.isLoaned && (
+                                <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[9px] font-extrabold uppercase tracking-wider bg-purple-100 text-purple-800 border border-purple-200 shadow-2xs">
+                                  <ArrowRightLeft size={10} />
+                                  Emprestado do {getTeamDisplay(item.loanedFromTeam || (item.promoter?.team || 'flash'), teams).name}
+                                </span>
+                              )}
+                            </div>
+                            <div className="text-[10px] text-zinc-400 font-medium mt-0.5">
                               {item.type === 'advance' ? (
-                                <span className="text-indigo-600 font-bold uppercase tracking-widest">{formatDate(new Date(item.date + 'T12:00:00'))} • Adiantamento</span>
+                                <span className="text-indigo-600 font-bold uppercase tracking-widest">
+                                  {formatDate(new Date(item.date + 'T12:00:00'))} • Adiantamento {item.advance?.notes ? `(${item.advance.notes})` : ''}
+                                </span>
                               ) : (
                                 <span>CPF: {item.promoter?.document} • PIX: {item.promoter?.pixKey}</span>
                               )}

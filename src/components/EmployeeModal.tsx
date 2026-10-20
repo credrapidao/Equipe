@@ -26,7 +26,10 @@ export function EmployeeModal({ isOpen, onClose, editingEmployee, onDelete, read
     active: true,
     team: 'flash' as Employee['team'],
     admissionDate: '',
-    dismissalDate: ''
+    dismissalDate: '',
+    isSupervisor: false,
+    supervisorBonus: 30,
+    supervisorTeam: 'flash'
   });
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [isDeleting, setIsDeleting] = useState(false);
@@ -49,7 +52,10 @@ export function EmployeeModal({ isOpen, onClose, editingEmployee, onDelete, read
         active: editingEmployee.active,
         team: editingEmployee.team || 'flash',
         admissionDate: editingEmployee.admissionDate || '',
-        dismissalDate: editingEmployee.dismissalDate || ''
+        dismissalDate: editingEmployee.dismissalDate || '',
+        isSupervisor: Boolean(editingEmployee.isSupervisor),
+        supervisorBonus: editingEmployee.supervisorBonus ?? 30,
+        supervisorTeam: editingEmployee.supervisorTeam || editingEmployee.team || 'flash'
       });
     } else {
       setFormData({
@@ -64,7 +70,10 @@ export function EmployeeModal({ isOpen, onClose, editingEmployee, onDelete, read
         active: true,
         team: 'flash',
         admissionDate: '',
-        dismissalDate: ''
+        dismissalDate: '',
+        isSupervisor: false,
+        supervisorBonus: 30,
+        supervisorTeam: 'flash'
       });
     }
   }, [editingEmployee, isOpen]);
@@ -98,6 +107,9 @@ export function EmployeeModal({ isOpen, onClose, editingEmployee, onDelete, read
         team: formData.team || 'flash',
         admissionDate: formData.admissionDate || '',
         dismissalDate: formData.dismissalDate || '',
+        isSupervisor: Boolean(formData.isSupervisor),
+        supervisorBonus: Number(formData.supervisorBonus || 30),
+        supervisorTeam: formData.supervisorTeam || formData.team || 'flash',
         updatedAt: new Date().toISOString()
       };
 
@@ -356,6 +368,74 @@ export function EmployeeModal({ isOpen, onClose, editingEmployee, onDelete, read
                   className="w-full rounded-xl border border-zinc-200 bg-zinc-50 px-4 py-2.5 text-sm focus:border-indigo-500 focus:outline-none focus:ring-4 focus:ring-indigo-500/10 transition-all font-medium"
                 />
               </div>
+            </div>
+
+            {/* Configuração de Supervisão em Equipe e Bônus */}
+            <div className="rounded-2xl border border-amber-200 bg-amber-50/70 p-4 space-y-3.5 transition-all">
+              <div className="flex items-start justify-between gap-3">
+                <div className="flex items-start gap-2.5">
+                  <span className="text-xl leading-none mt-0.5">⭐</span>
+                  <div>
+                    <label htmlFor="emp-isSupervisor" className="text-sm font-extrabold text-zinc-900 cursor-pointer flex items-center gap-1.5">
+                      Supervisor(a) de Equipe
+                    </label>
+                    <p className="text-xs text-zinc-600 mt-0.5">
+                      Identifica este colaborador como líder de equipe e habilita o bônus diário de supervisão.
+                    </p>
+                  </div>
+                </div>
+                <input 
+                  type="checkbox" 
+                  id="emp-isSupervisor"
+                  checked={formData.isSupervisor}
+                  onChange={e => setFormData({ ...formData, isSupervisor: e.target.checked })}
+                  className="h-5 w-5 rounded border-zinc-300 text-amber-600 focus:ring-amber-500 cursor-pointer mt-0.5"
+                />
+              </div>
+
+              {formData.isSupervisor && (
+                <div className="space-y-3 pt-3 border-t border-amber-200/80">
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                    <div className="space-y-1.5">
+                      <label className="text-xs font-bold uppercase tracking-wider text-amber-900 flex items-center gap-1">
+                        Bônus Diário de Supervisão
+                        <span className="text-zinc-500 font-normal lowercase">(R$/dia)</span>
+                      </label>
+                      <div className="relative">
+                        <span className="absolute left-3.5 top-1/2 -translate-y-1/2 text-zinc-500 font-bold text-xs">R$</span>
+                        <input 
+                          type="number" 
+                          min="0"
+                          step="1"
+                          value={formData.supervisorBonus}
+                          onChange={e => setFormData({ ...formData, supervisorBonus: Number(e.target.value) })}
+                          className="w-full rounded-xl border border-amber-300 bg-white pl-9 pr-3 py-2 text-sm font-bold text-zinc-900 focus:border-amber-500 focus:outline-none focus:ring-2 focus:ring-amber-500/20"
+                          placeholder="30"
+                        />
+                      </div>
+                      <p className="text-[11px] text-amber-700">Padrão: R$ 30,00 por dia</p>
+                    </div>
+
+                    <div className="space-y-1.5">
+                      <label className="text-xs font-bold uppercase tracking-wider text-amber-900">
+                        Equipe Supervisionada
+                      </label>
+                      <select 
+                        value={formData.supervisorTeam || formData.team}
+                        onChange={e => setFormData({ ...formData, supervisorTeam: e.target.value })}
+                        className="w-full rounded-xl border border-amber-300 bg-white px-3 py-2 text-sm font-bold text-zinc-900 focus:border-amber-500 focus:outline-none focus:ring-2 focus:ring-amber-500/20"
+                      >
+                        {teams.map(t => (
+                          <option key={t.id} value={t.id}>
+                            {t.icon || '👥'} {t.name}
+                          </option>
+                        ))}
+                      </select>
+                      <p className="text-[11px] text-amber-700">Equipe liderada por esta supervisão</p>
+                    </div>
+                  </div>
+                </div>
+              )}
             </div>
 
             {/* Pix configuration */}

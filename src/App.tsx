@@ -115,12 +115,30 @@ export default function App() {
   }, [promoters, selectedTeam, searchQuery]);
 
   const filteredAttendance = useMemo(() => {
-    return allAttendance.filter(a => filteredPromoters.some(p => p.id === a.promoterId));
-  }, [allAttendance, filteredPromoters]);
+    if (selectedTeam === 'all') return allAttendance;
+    return allAttendance.filter(a => {
+      // Se foi emprestado, pertence à equipe de destino
+      if (a.isLoaned) {
+        return a.loanedToTeam === selectedTeam;
+      }
+      // Se não foi emprestado, pertence à equipe de origem do promotor
+      const promoter = promoters.find(p => p.id === a.promoterId);
+      const homeTeam = promoter?.team || 'flash';
+      return homeTeam === selectedTeam;
+    });
+  }, [allAttendance, selectedTeam, promoters]);
 
   const filteredAdvances = useMemo(() => {
-    return allAdvances.filter(a => filteredPromoters.some(p => p.id === a.promoterId));
-  }, [allAdvances, filteredPromoters]);
+    if (selectedTeam === 'all') return allAdvances;
+    return allAdvances.filter(a => {
+      if (a.team) {
+        return a.team === selectedTeam;
+      }
+      const promoter = promoters.find(p => p.id === a.promoterId);
+      const homeTeam = promoter?.team || 'flash';
+      return homeTeam === selectedTeam;
+    });
+  }, [allAdvances, selectedTeam, promoters]);
 
   useEffect(() => {
     const unsubscribe = onAuthStateChanged(auth, (firebaseUser) => {
@@ -235,9 +253,14 @@ export default function App() {
     const unpaidAttendance = filteredAttendance.filter(a => a.paymentStatus === 'pending');
     const totalUnpaidAmount = unpaidAttendance.reduce((sum, a) => {
       if (a.status === 'absent') return sum;
+      if (a.dailyRate !== undefined && Number(a.dailyRate) > 0) return sum + Number(a.dailyRate);
+      const promoter = promoters.find(p => p.id === a.promoterId);
+      const supervisorBonus = a.supervisorBonus !== undefined 
+        ? Number(a.supervisorBonus) 
+        : (promoter?.isSupervisor ? Number(promoter.supervisorBonus ?? 30) : 0);
       const rate = a.workedHours !== undefined 
-        ? a.workedHours * 20 
-        : (a.dailyRate !== undefined ? a.dailyRate : (a.status === 'half-day' ? 50 : 100));
+        ? (Number(a.workedHours) * 20) + (Number(a.workedHours) > 0 ? supervisorBonus : 0)
+        : (a.status === 'half-day' ? 50 + supervisorBonus : 100 + supervisorBonus);
       return sum + rate;
     }, 0);
 
@@ -889,15 +912,15 @@ export default function App() {
                   />
                   <StatCard 
                     label="Adiantamento Pendente" 
-                    value={formatCurrency(financialSummary.pendingAdvances)} 
+                    value={formatCurrency(financialSummary.pendingAdvances + financialSummary.unpaidAmount)} 
                     icon={<Wallet className="text-red-600" />} 
-                    subtext="Adiantamentos em aberto"
+                    subtext={`Saldos (${formatCurrency(financialSummary.unpaidAmount)}) + Lançados (${formatCurrency(financialSummary.pendingAdvances)})`}
                   />
                   <StatCard 
-                    label="Saldo Líquido" 
-                    value={formatCurrency(financialSummary.netBalance)} 
+                    label="Saldo a Liquidar" 
+                    value={formatCurrency(financialSummary.netBalance > 0 ? financialSummary.netBalance : financialSummary.unpaidAmount)} 
                     icon={<CheckCircle2 className="text-green-600" />} 
-                    subtext="Diárias - Adiantamentos"
+                    subtext="Diárias a pagar aos promotores"
                   />
                   
                   <div className="col-span-full">
@@ -1013,7 +1036,11 @@ export default function App() {
               )}
 
               {activeTab === 'advances' && (
-                <AdvanceManager promoters={filteredPromoters} readOnly={userRole === 'viewer'} />
+                <AdvanceManager 
+                  promoters={promoters} 
+                  selectedTeam={selectedTeam}
+                  readOnly={userRole === 'viewer'} 
+                />
               )}
 
               {activeTab === 'reports' && (

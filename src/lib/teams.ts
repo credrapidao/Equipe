@@ -96,6 +96,15 @@ export function getTeamDisplay(teamId: string | undefined, teamsList: Team[]) {
       color: rap?.color || 'amber',
     };
   }
+  if (teamId === 'start' || teamId === 'start-credito') {
+    const start = teamsList.find(t => t.id === 'start' || t.id === 'start-credito');
+    return {
+      id: teamId,
+      name: start?.name || (teamId === 'start-credito' ? 'Start Crédito' : 'Time Start'),
+      icon: start?.icon || '🌟',
+      color: start?.color || 'emerald',
+    };
+  }
   if (teamId === 'both') {
     return {
       id: 'both',
@@ -136,9 +145,10 @@ export function useTeams() {
         ...d.data()
       } as Team));
 
-      // Ensure flash and rapidao always exist
+      // Ensure flash, rapidao and start always exist
       const hasFlash = list.some(t => t.id === 'flash');
       const hasRapidao = list.some(t => t.id === 'rapidao');
+      const hasStart = list.some(t => t.id === 'start');
       const merged: Team[] = [...list];
 
       if (!hasFlash) {
@@ -147,6 +157,9 @@ export function useTeams() {
       if (!hasRapidao) {
         const flashIdx = merged.findIndex(t => t.id === 'flash');
         merged.splice(flashIdx + 1, 0, DEFAULT_TEAMS[1]);
+      }
+      if (!hasStart && DEFAULT_TEAMS[2]) {
+        merged.push(DEFAULT_TEAMS[2]);
       }
 
       setTeams(prev => {

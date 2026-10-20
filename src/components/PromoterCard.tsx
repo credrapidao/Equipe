@@ -42,7 +42,14 @@ export default function PromoterCard({ promoter, onEdit, onToggleStatus, readOnl
             {promoter.name.charAt(0).toUpperCase()}
           </div>
           <div>
-            <h3 className={`font-bold leading-tight ${promoter.active ? 'text-zinc-900' : 'text-zinc-500'}`}>{promoter.name}</h3>
+            <div className="flex items-center gap-1.5 flex-wrap">
+              <h3 className={`font-bold leading-tight ${promoter.active ? 'text-zinc-900' : 'text-zinc-500'}`}>{promoter.name}</h3>
+              {promoter.isSupervisor && (
+                <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[9px] font-black uppercase tracking-wider bg-amber-100 text-amber-900 border border-amber-300 shadow-2xs">
+                  <span>⭐</span> Supervisora
+                </span>
+              )}
+            </div>
             <span className="text-xs text-zinc-400 font-medium uppercase tracking-wider tabular-nums">{displayDocument}</span>
           </div>
         </div>
@@ -112,6 +119,11 @@ export default function PromoterCard({ promoter, onEdit, onToggleStatus, readOnl
             <span>{teamDisplay.icon}</span>
             <span>{teamDisplay.name}</span>
           </div>
+          {promoter.isSupervisor && (
+            <div className="flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[10px] font-extrabold uppercase tracking-wider bg-amber-100 text-amber-900 border border-amber-300">
+              <span>⭐ Bônus: +R$ {(promoter.supervisorBonus ?? 30).toFixed(2)}/dia</span>
+            </div>
+          )}
         </div>
         <div className="text-[10px] font-bold text-zinc-400 uppercase tracking-tighter flex items-center gap-1">
           <Shield size={10} className="text-emerald-500" />

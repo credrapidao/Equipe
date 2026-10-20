@@ -34,6 +34,32 @@ export function handleFirestoreError(error: unknown, operationType: OperationTyp
 export const TIMEZONE = 'America/Sao_Paulo';
 
 /**
+ * Retorna um objeto Date correspondente ao momento atual ou à data fornecida no horário de São Paulo
+ */
+export function getSaoPauloDate(date: Date = new Date()): Date {
+  const spString = date.toLocaleString('en-US', { timeZone: TIMEZONE });
+  return new Date(spString);
+}
+
+/**
+ * Retorna a data de hoje no fuso horário de São Paulo no formato padrão YYYY-MM-DD
+ */
+export function getTodaySaoPaulo(): string {
+  return formatDate(new Date());
+}
+
+/**
+ * Retorna o início da semana (Domingo às 00:00:00) calculado de acordo com o horário de São Paulo
+ */
+export function getStartOfWeekSaoPaulo(date: Date = new Date()): Date {
+  const spDate = getSaoPauloDate(date);
+  const startOfWeek = new Date(spDate);
+  startOfWeek.setDate(spDate.getDate() - spDate.getDay());
+  startOfWeek.setHours(0, 0, 0, 0);
+  return startOfWeek;
+}
+
+/**
  * Retorna a data no fuso horário de São Paulo no formato padrão YYYY-MM-DD
  */
 export function formatDate(date: Date = new Date()): string {

@@ -112,9 +112,16 @@ export function EmployeeCard({ employee, onEdit, onDelete, onTransfer, readOnly,
           <User size={20} />
         </div>
         <div className="space-y-1">
-          <h4 className="font-bold text-zinc-950 tracking-tight text-sm leading-tight pr-6 group-hover:text-indigo-600 transition-colors">
-            {employee.name}
-          </h4>
+          <div className="flex items-center gap-1.5 flex-wrap">
+            <h4 className="font-bold text-zinc-950 tracking-tight text-sm leading-tight group-hover:text-indigo-600 transition-colors">
+              {employee.name}
+            </h4>
+            {employee.isSupervisor && (
+              <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[9px] font-black uppercase tracking-wider bg-amber-100 text-amber-900 border border-amber-300 shadow-2xs">
+                ⭐ Supervisora (+R$ {(employee.supervisorBonus ?? 30).toFixed(2)}/dia)
+              </span>
+            )}
+          </div>
           {(employee.role || employee.level) && (
             <div className="flex items-center gap-1.5 flex-wrap text-xs font-bold text-indigo-700">
               {employee.role && <span>{employee.role}</span>}
