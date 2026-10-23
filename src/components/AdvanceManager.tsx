@@ -151,13 +151,10 @@ export default function AdvanceManager({ promoters, selectedTeam = 'all', readOn
       .filter(a => a.status === 'pending')
       .reduce((sum, a) => sum + a.amount, 0);
 
-    const totalPaidAdvances = relevantAdv
-      .filter(a => a.status === 'paid')
-      .reduce((sum, a) => sum + a.amount, 0);
-
-    const unclearedPaidAdvances = Math.max(0, totalPaidAdvances - paidAttendance);
-
-    return Math.max(0, Math.round((pendingAttendance - totalPendingAdvances - unclearedPaidAdvances) * 100) / 100);
+    // O saldo pendente a adiantar/pagar é calculado com base nas presenças pendentes (não quitadas),
+    // deduzindo eventuais adiantamentos já lançados com status 'pending'.
+    // Presenças e adiantamentos com status 'paid' pertencem a ciclos passados já finalizados.
+    return Math.max(0, Math.round((pendingAttendance - totalPendingAdvances) * 100) / 100);
   };
 
   const getTotalPaid = (promoterId: string) => {

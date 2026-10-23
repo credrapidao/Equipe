@@ -911,16 +911,16 @@ export default function App() {
                     subtext={`${financialSummary.unpaidDays} presenças a pagar`}
                   />
                   <StatCard 
-                    label="Adiantamento Pendente" 
-                    value={formatCurrency(financialSummary.pendingAdvances + financialSummary.unpaidAmount)} 
+                    label="Adiantamentos Lançados" 
+                    value={formatCurrency(financialSummary.pendingAdvances)} 
                     icon={<Wallet className="text-red-600" />} 
-                    subtext={`Saldos (${formatCurrency(financialSummary.unpaidAmount)}) + Lançados (${formatCurrency(financialSummary.pendingAdvances)})`}
+                    subtext={financialSummary.pendingAdvances > 0 ? `${financialSummary.pendingAdvances} adiantamento(s) a abater` : 'Nenhum adiantamento pendente'}
                   />
                   <StatCard 
                     label="Saldo a Liquidar" 
-                    value={formatCurrency(financialSummary.netBalance > 0 ? financialSummary.netBalance : financialSummary.unpaidAmount)} 
+                    value={formatCurrency(financialSummary.netBalance > 0 ? financialSummary.netBalance : 0)} 
                     icon={<CheckCircle2 className="text-green-600" />} 
-                    subtext="Diárias a pagar aos promotores"
+                    subtext="Líquido total a pagar aos promotores"
                   />
                   
                   <div className="col-span-full">
