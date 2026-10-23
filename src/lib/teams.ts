@@ -77,8 +77,32 @@ export function getTeamColorStyle(colorName?: string) {
   return TEAM_COLOR_MAP[key] || TEAM_COLOR_MAP['indigo'];
 }
 
+/**
+ * Normaliza identificadores de equipe para tratar aliases conhecidos.
+ * 'start' e 'start-credito' representam a mesma equipe ('start-credito').
+ */
+export function normalizeTeamId(teamId?: string | null): string {
+  if (!teamId) return 'flash';
+  const clean = teamId.trim().toLowerCase();
+  if (clean === 'start' || clean === 'start-credito' || clean === 'start_credito' || clean === 'startcredito') {
+    return 'start-credito';
+  }
+  return clean;
+}
+
+/**
+ * Compara se duas equipes são equivalentes, respeitando 'all' e aliases como start/start-credito
+ */
+export function isSameTeam(teamA?: string | null, teamB?: string | null): boolean {
+  if (!teamA || !teamB) return false;
+  if (teamA === 'all' || teamB === 'all') return true;
+  return normalizeTeamId(teamA) === normalizeTeamId(teamB);
+}
+
 export function getTeamDisplay(teamId: string | undefined, teamsList: Team[]) {
-  if (!teamId || teamId === 'flash') {
+  const normId = normalizeTeamId(teamId);
+
+  if (!teamId || normId === 'flash') {
     const flash = teamsList.find(t => t.id === 'flash');
     return {
       id: 'flash',
@@ -87,7 +111,7 @@ export function getTeamDisplay(teamId: string | undefined, teamsList: Team[]) {
       color: flash?.color || 'indigo',
     };
   }
-  if (teamId === 'rapidao') {
+  if (normId === 'rapidao') {
     const rap = teamsList.find(t => t.id === 'rapidao');
     return {
       id: 'rapidao',
@@ -96,11 +120,11 @@ export function getTeamDisplay(teamId: string | undefined, teamsList: Team[]) {
       color: rap?.color || 'amber',
     };
   }
-  if (teamId === 'start' || teamId === 'start-credito') {
-    const start = teamsList.find(t => t.id === 'start' || t.id === 'start-credito');
+  if (normId === 'start-credito') {
+    const start = teamsList.find(t => normalizeTeamId(t.id) === 'start-credito');
     return {
-      id: teamId,
-      name: start?.name || (teamId === 'start-credito' ? 'Start Crédito' : 'Time Start'),
+      id: 'start-credito',
+      name: start?.name || 'Time Start Crédito',
       icon: start?.icon || '🌟',
       color: start?.color || 'emerald',
     };
@@ -114,7 +138,7 @@ export function getTeamDisplay(teamId: string | undefined, teamsList: Team[]) {
     };
   }
 
-  const found = teamsList.find(t => t.id === teamId);
+  const found = teamsList.find(t => normalizeTeamId(t.id) === normId);
   if (found) {
     return {
       id: found.id,
@@ -140,16 +164,21 @@ export function useTeams() {
   useEffect(() => {
     const teamsCol = collection(db, 'teams');
     const unsubTeams = onSnapshot(teamsCol, (snapshot) => {
-      const list: Team[] = snapshot.docs.map(d => ({
-        id: d.id,
-        ...d.data()
-      } as Team));
+      // Ignora doc legado 'start' e unifica com 'start-credito' (Time Start Crédito)
+      const listWithoutLegacyStart: Team[] = snapshot.docs
+        .filter(d => d.id !== 'start')
+        .map(d => ({
+          id: d.id,
+          ...d.data(),
+          name: d.id === 'start-credito' ? 'Time Start Crédito' : d.data().name,
+          icon: d.id === 'start-credito' ? (d.data().icon || '🌟') : d.data().icon,
+        } as Team));
 
-      // Ensure flash, rapidao and start always exist
-      const hasFlash = list.some(t => t.id === 'flash');
-      const hasRapidao = list.some(t => t.id === 'rapidao');
-      const hasStart = list.some(t => t.id === 'start');
-      const merged: Team[] = [...list];
+      // Ensure flash, rapidao and start-credito always exist
+      const hasFlash = listWithoutLegacyStart.some(t => t.id === 'flash');
+      const hasRapidao = listWithoutLegacyStart.some(t => t.id === 'rapidao');
+      const hasStartCredito = listWithoutLegacyStart.some(t => normalizeTeamId(t.id) === 'start-credito');
+      const merged: Team[] = [...listWithoutLegacyStart];
 
       if (!hasFlash) {
         merged.unshift(DEFAULT_TEAMS[0]);
@@ -158,14 +187,14 @@ export function useTeams() {
         const flashIdx = merged.findIndex(t => t.id === 'flash');
         merged.splice(flashIdx + 1, 0, DEFAULT_TEAMS[1]);
       }
-      if (!hasStart && DEFAULT_TEAMS[2]) {
+      if (!hasStartCredito && DEFAULT_TEAMS[2]) {
         merged.push(DEFAULT_TEAMS[2]);
       }
 
       setTeams(prev => {
-        // preserve any auto-discovered teams that aren't yet in firestore
-        const customIds = new Set(merged.map(m => m.id));
-        const extra = prev.filter(p => !customIds.has(p.id) && p.id !== 'both');
+        // preserve any custom teams that aren't yet in firestore
+        const customIds = new Set(merged.map(m => normalizeTeamId(m.id)));
+        const extra = prev.filter(p => !customIds.has(normalizeTeamId(p.id)) && p.id !== 'both');
         return [...merged, ...extra];
       });
       setLoading(false);
@@ -175,13 +204,24 @@ export function useTeams() {
       setLoading(false);
     });
 
-    // Auto-discover teams referenced in employees and promoters (e.g. "start")
+    // Auto-discover teams referenced in employees and promoters
     const unsubEmployees = onSnapshot(collection(db, 'employees'), (snapshot) => {
       snapshot.docs.forEach(d => {
         const data = d.data();
         const teamId = data.team;
         if (teamId && teamId !== 'flash' && teamId !== 'rapidao' && teamId !== 'both') {
-          // If not in teams, persist to Firestore teams collection
+          const norm = normalizeTeamId(teamId);
+          if (norm === 'start-credito') {
+            setDoc(doc(db, 'teams', 'start-credito'), {
+              id: 'start-credito',
+              name: 'Time Start Crédito',
+              icon: '🌟',
+              color: 'emerald',
+              isDefault: true,
+              createdAt: new Date().toISOString()
+            }, { merge: true }).catch(() => {});
+            return;
+          }
           const teamSlug = String(teamId).trim().toLowerCase();
           const cleanName = data.teamName || (teamSlug.charAt(0).toUpperCase() + teamSlug.slice(1));
           const displayName = cleanName.toLowerCase().startsWith('time ') ? cleanName : `Time ${cleanName}`;
@@ -203,6 +243,18 @@ export function useTeams() {
         const data = d.data();
         const teamId = data.team;
         if (teamId && teamId !== 'flash' && teamId !== 'rapidao' && teamId !== 'both') {
+          const norm = normalizeTeamId(teamId);
+          if (norm === 'start-credito') {
+            setDoc(doc(db, 'teams', 'start-credito'), {
+              id: 'start-credito',
+              name: 'Time Start Crédito',
+              icon: '🌟',
+              color: 'emerald',
+              isDefault: true,
+              createdAt: new Date().toISOString()
+            }, { merge: true }).catch(() => {});
+            return;
+          }
           const teamSlug = String(teamId).trim().toLowerCase();
           const cleanName = teamSlug.charAt(0).toUpperCase() + teamSlug.slice(1);
           const displayName = cleanName.toLowerCase().startsWith('time ') ? cleanName : `Time ${cleanName}`;
@@ -273,10 +325,20 @@ export async function transferEmployeeTeam(employeeId: string, targetTeamId: str
 
 // Function to delete a custom team
 export async function deleteTeamFromFirestore(teamId: string) {
-  if (teamId === 'flash' || teamId === 'rapidao') {
-    throw new Error('Não é permitido excluir as equipes padrão do sistema.');
+  if (teamId === 'flash' || teamId === 'rapidao' || teamId === 'start-credito') {
+    throw new Error('Não é permitido excluir as equipes principais do sistema (Time Flash, Time Rapidão e Time Start Crédito).');
   }
   await deleteDoc(doc(db, 'teams', teamId));
+}
+
+// Helper to remove any legacy 'start' doc from Firestore if found
+export async function cleanupEmptyLegacyTeams() {
+  try {
+    const startDocRef = doc(db, 'teams', 'start');
+    await deleteDoc(startDocRef);
+  } catch (e) {
+    console.warn('Limpeza de equipe legada start:', e);
+  }
 }
 
 export const deleteCustomTeam = deleteTeamFromFirestore;

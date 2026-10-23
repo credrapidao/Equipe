@@ -18,6 +18,7 @@ import { db, googleSignIn, getAccessToken, setAccessToken } from '../lib/firebas
 import { doc, getDoc, setDoc, serverTimestamp } from 'firebase/firestore';
 import { Promoter, Attendance, Advance } from '../types';
 import { formatDateTime } from '../lib/utils';
+import { normalizeTeamId } from '../lib/teams';
 
 interface GoogleSheetsSyncProps {
   promoters: Promoter[];
@@ -138,7 +139,7 @@ export default function GoogleSheetsSync({
 
       const saldoLiquido = totalDiarias - totalAdiantamentos;
 
-      const teamName = p.team === 'rapidao' ? 'Time Rapidão' : (p.team === 'start' || p.team === 'start-credito' ? 'Time Start' : 'Time Flash');
+      const teamName = p.team === 'rapidao' ? 'Time Rapidão' : (normalizeTeamId(p.team) === 'start-credito' ? 'Time Start Crédito' : 'Time Flash');
 
       return [
         p.name,
@@ -158,7 +159,7 @@ export default function GoogleSheetsSync({
       p.id,
       p.name,
       p.document,
-      p.team === 'rapidao' ? 'Time Rapidão' : 'Time Flash',
+      p.team === 'rapidao' ? 'Time Rapidão' : (normalizeTeamId(p.team) === 'start-credito' ? 'Time Start Crédito' : 'Time Flash'),
       p.pixKeyType,
       p.pixKey,
       p.defaultDailyRate,
@@ -183,7 +184,7 @@ export default function GoogleSheetsSync({
                 ? (Number(a.workedHours) * 20) + (Number(a.workedHours) > 0 ? supervisorBonus : 0)
                 : (a.status === 'half-day' ? 50 + supervisorBonus : (promoter?.defaultDailyRate || (100 + supervisorBonus)))));
 
-      const teamName = promoter?.team === 'rapidao' ? 'Time Rapidão' : (promoter?.team === 'start' || promoter?.team === 'start-credito' ? 'Time Start' : 'Time Flash');
+      const teamName = promoter?.team === 'rapidao' ? 'Time Rapidão' : (normalizeTeamId(promoter?.team) === 'start-credito' ? 'Time Start Crédito' : 'Time Flash');
 
       return [
         formatToBrazilianDate(a.date),

@@ -9,23 +9,29 @@ import { db } from '../lib/firebase';
 import { collection, query, where, onSnapshot, setDoc, doc, updateDoc, deleteDoc } from 'firebase/firestore';
 import { Promoter, Attendance, OperationType, Team } from '../types';
 import { handleFirestoreError, formatDate } from '../lib/utils';
-import { useTeams, getTeamDisplay, getTeamColorStyle } from '../lib/teams';
+import { useTeams, getTeamDisplay, getTeamColorStyle, isSameTeam, normalizeTeamId } from '../lib/teams';
 
 export const HOURLY_RATE = 20; // R$ 20,00 por hora trabalhada
 export const DEFAULT_HOURS = 5; // 5 horas padrão de trabalho
 
 interface AttendanceTrackerProps {
   promoters: Promoter[];
+  allPromoters?: Promoter[];
+  selectedTeam?: string;
   readOnly?: boolean;
   teams?: Team[];
   userRole?: 'admin' | 'supervisor' | 'viewer';
+  searchQuery?: string;
 }
 
 export default function AttendanceTracker({ 
   promoters, 
+  allPromoters,
+  selectedTeam,
   readOnly, 
   teams: propTeams,
-  userRole = 'admin' 
+  userRole = 'admin',
+  searchQuery = ''
 }: AttendanceTrackerProps) {
   const { teams: hookTeams } = useTeams();
   const teamsList = propTeams && propTeams.length > 0 ? propTeams : hookTeams;
@@ -33,14 +39,18 @@ export default function AttendanceTracker({
   const [attendanceData, setAttendanceData] = useState<Record<string, Attendance>>({});
   const [inputHours, setInputHours] = useState<Record<string, string>>({});
   const [loading, setLoading] = useState(true);
-  const [filterOnlyLoaned, setFilterOnlyLoaned] = useState(false);
+  const [filterLoanedMode, setFilterLoanedMode] = useState<'all' | 'only-loaned' | 'loaned-in' | 'loaned-out'>('all');
+  const [showBorrowModal, setShowBorrowModal] = useState(false);
 
   const isSupervisor = userRole === 'supervisor';
+  const promotersPool = useMemo(() => {
+    return allPromoters && allPromoters.length > 0 ? allPromoters : promoters;
+  }, [allPromoters, promoters]);
 
   useEffect(() => {
     setLoading(true);
     
-    const unsubscribes = promoters.map(promoter => {
+    const unsubscribes = promotersPool.map(promoter => {
       const q = query(
         collection(db, `promoters/${promoter.id}/attendance`),
         where('date', '==', selectedDate)
@@ -65,7 +75,7 @@ export default function AttendanceTracker({
     });
 
     return () => unsubscribes.forEach(unsub => unsub());
-  }, [selectedDate, promoters]);
+  }, [selectedDate, promotersPool]);
 
   const toggleStatus = async (promoterId: string, status: Attendance['status']) => {
     const existing = attendanceData[promoterId];
@@ -130,18 +140,23 @@ export default function AttendanceTracker({
   };
 
   const getDefaultDestinationTeam = (promoterTeam?: string) => {
-    const homeTeam = promoterTeam || 'flash';
-    const otherTeam = teamsList.find(t => t.id !== homeTeam);
-    return otherTeam?.id || (homeTeam === 'flash' ? 'rapidao' : 'flash');
+    const homeTeam = promoterTeam ? normalizeTeamId(promoterTeam) : 'flash';
+    const otherTeam = teamsList.find(t => !isSameTeam(t.id, homeTeam));
+    if (otherTeam) {
+      return normalizeTeamId(otherTeam.id);
+    }
+    return isSameTeam(homeTeam, 'flash') ? 'rapidao' : 'flash';
   };
 
-  const toggleLoaned = async (promoterId: string, isLoaned: boolean) => {
+  const toggleLoaned = async (promoterId: string, isLoaned: boolean, preferredTargetTeam?: string) => {
     const existing = attendanceData[promoterId];
     const attendanceId = existing?.id || selectedDate;
     const docRef = doc(db, `promoters/${promoterId}/attendance`, attendanceId);
-    const promoter = promoters.find(p => p.id === promoterId);
-    const homeTeam = promoter?.team || 'flash';
-    const destinationTeam = isLoaned ? (existing?.loanedToTeam || getDefaultDestinationTeam(homeTeam)) : null;
+    const promoter = promotersPool.find(p => p.id === promoterId);
+    const homeTeam = promoter?.team ? normalizeTeamId(promoter.team) : 'flash';
+    const destinationTeam = isLoaned 
+      ? (preferredTargetTeam ? normalizeTeamId(preferredTargetTeam) : (normalizeTeamId(existing?.loanedToTeam) || getDefaultDestinationTeam(homeTeam))) 
+      : null;
 
     try {
       if (existing) {
@@ -177,14 +192,15 @@ export default function AttendanceTracker({
     const existing = attendanceData[promoterId];
     const attendanceId = existing?.id || selectedDate;
     const docRef = doc(db, `promoters/${promoterId}/attendance`, attendanceId);
-    const promoter = promoters.find(p => p.id === promoterId);
-    const homeTeam = promoter?.team || 'flash';
+    const promoter = promotersPool.find(p => p.id === promoterId);
+    const homeTeam = promoter?.team ? normalizeTeamId(promoter.team) : 'flash';
+    const normalizedTarget = normalizeTeamId(targetTeamId);
 
     try {
       if (existing) {
         await updateDoc(docRef, { 
           isLoaned: true,
-          loanedToTeam: targetTeamId,
+          loanedToTeam: normalizedTarget,
           loanedFromTeam: existing.loanedFromTeam || homeTeam
         });
       } else {
@@ -200,7 +216,7 @@ export default function AttendanceTracker({
           workedHours: defaultHours,
           supervisorBonus,
           isLoaned: true,
-          loanedToTeam: targetTeamId,
+          loanedToTeam: normalizedTarget,
           loanedFromTeam: homeTeam,
           recordedAt: new Date().toISOString()
         });
@@ -282,41 +298,113 @@ export default function AttendanceTracker({
     let halfDay = 0;
     let absent = 0;
     let totalHours = 0;
-    let loaned = 0;
+    let loanedTotal = 0;
+    let loanedIn = 0;
+    let loanedOut = 0;
     let totalAmount = 0;
 
-    promoters.forEach(p => {
+    promotersPool.forEach(p => {
       const att = attendanceData[p.id];
+      const homeTeam = p.team ? normalizeTeamId(p.team) : 'flash';
+
       if (att) {
-        if (att.status === 'present') present++;
-        if (att.status === 'half-day') halfDay++;
-        if (att.status === 'absent') absent++;
-        const h = att.workedHours !== undefined ? att.workedHours : (att.status === 'present' ? DEFAULT_HOURS : (att.status === 'half-day' ? 2.5 : 0));
-        totalHours += h;
-        if (att.isLoaned) loaned++;
-        const supervisorDailyBonus = (att.status !== 'absent' && p.isSupervisor) ? (p.supervisorBonus ?? 30) : 0;
-        const pay = att.status === 'absent'
-          ? 0
-          : (att.dailyRate !== undefined && Number(att.dailyRate) > 0 
-              ? Number(att.dailyRate) 
-              : ((att.workedHours !== undefined ? Number(att.workedHours) : h) * HOURLY_RATE + supervisorDailyBonus));
-        totalAmount += pay;
+        const isBelongingToCurrentTeam = !selectedTeam || selectedTeam === 'all' || 
+          isSameTeam(homeTeam, selectedTeam) || 
+          (att.isLoaned && isSameTeam(att.loanedToTeam, selectedTeam));
+
+        if (isBelongingToCurrentTeam) {
+          if (att.status === 'present') present++;
+          if (att.status === 'half-day') halfDay++;
+          if (att.status === 'absent') absent++;
+          const h = att.workedHours !== undefined ? att.workedHours : (att.status === 'present' ? DEFAULT_HOURS : (att.status === 'half-day' ? 2.5 : 0));
+          totalHours += h;
+
+          const supervisorDailyBonus = (att.status !== 'absent' && p.isSupervisor) ? (p.supervisorBonus ?? 30) : 0;
+          const pay = att.status === 'absent'
+            ? 0
+            : (att.dailyRate !== undefined && Number(att.dailyRate) > 0 
+                ? Number(att.dailyRate) 
+                : ((att.workedHours !== undefined ? Number(att.workedHours) : h) * HOURLY_RATE + supervisorDailyBonus));
+          totalAmount += pay;
+        }
+
+        if (att.isLoaned) {
+          if (!selectedTeam || selectedTeam === 'all') {
+            loanedTotal++;
+          } else {
+            if (isSameTeam(att.loanedToTeam, selectedTeam) && !isSameTeam(homeTeam, selectedTeam)) {
+              loanedIn++;
+              loanedTotal++;
+            } else if (isSameTeam(homeTeam, selectedTeam) && !isSameTeam(att.loanedToTeam, selectedTeam)) {
+              loanedOut++;
+              loanedTotal++;
+            }
+          }
+        }
       }
     });
 
-    return { present, halfDay, absent, totalHours, loaned, totalAmount, total: promoters.length };
-  }, [promoters, attendanceData]);
+    return { 
+      present, 
+      halfDay, 
+      absent, 
+      totalHours, 
+      loanedTotal, 
+      loanedIn, 
+      loanedOut, 
+      totalAmount, 
+      total: promotersPool.length 
+    };
+  }, [promotersPool, attendanceData, selectedTeam]);
 
   const visiblePromoters = useMemo(() => {
-    return promoters
+    return promotersPool
       .filter(p => p.active || attendanceData[p.id])
       .filter(p => {
-        if (filterOnlyLoaned) {
-          return Boolean(attendanceData[p.id]?.isLoaned);
+        const att = attendanceData[p.id];
+        const homeTeam = p.team ? normalizeTeamId(p.team) : 'flash';
+
+        // 1. Team filtering:
+        if (selectedTeam && selectedTeam !== 'all') {
+          const isHome = isSameTeam(homeTeam, selectedTeam);
+          const isLoanedIn = Boolean(att?.isLoaned && isSameTeam(att.loanedToTeam, selectedTeam));
+          if (!isHome && !isLoanedIn) {
+            return false;
+          }
         }
+
+        // 2. Search query filter
+        if (searchQuery) {
+          const q = searchQuery.toLowerCase();
+          const matchName = p.name?.toLowerCase().includes(q);
+          const matchDoc = p.document?.toLowerCase().includes(q);
+          if (!matchName && !matchDoc) return false;
+        }
+
+        // 3. Sub-filter: loan modes
+        if (filterLoanedMode === 'only-loaned') {
+          return Boolean(att?.isLoaned);
+        }
+        if (filterLoanedMode === 'loaned-in') {
+          return Boolean(att?.isLoaned && selectedTeam && selectedTeam !== 'all' && isSameTeam(att.loanedToTeam, selectedTeam) && !isSameTeam(homeTeam, selectedTeam));
+        }
+        if (filterLoanedMode === 'loaned-out') {
+          return Boolean(att?.isLoaned && selectedTeam && selectedTeam !== 'all' && isSameTeam(homeTeam, selectedTeam) && !isSameTeam(att.loanedToTeam, selectedTeam));
+        }
+
         return true;
       });
-  }, [promoters, attendanceData, filterOnlyLoaned]);
+  }, [promotersPool, attendanceData, selectedTeam, searchQuery, filterLoanedMode]);
+
+  // Candidates for borrowing from other teams to the current team
+  const borrowCandidates = useMemo(() => {
+    if (!selectedTeam || selectedTeam === 'all') return [];
+    return promotersPool.filter(p => {
+      const home = p.team ? normalizeTeamId(p.team) : 'flash';
+      // Promotores de OUTRAS equipes
+      return !isSameTeam(home, selectedTeam) && p.active;
+    });
+  }, [promotersPool, selectedTeam]);
 
   return (
     <div className="bg-white rounded-2xl border border-zinc-200 overflow-hidden shadow-sm">
@@ -400,7 +488,7 @@ export default function AttendanceTracker({
           </div>
           <div className="flex items-center gap-1.5 pl-2 border-l border-zinc-200">
             <span className="text-emerald-600 font-black">R$</span>
-            <span className="text-zinc-600">Total a Pagar (Equipe):</span>
+            <span className="text-zinc-600">Total Diárias:</span>
             <strong className="text-emerald-700 font-black bg-emerald-50 border border-emerald-200 px-2 py-0.5 rounded-lg">
               R$ {dayStats.totalAmount.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
             </strong>
@@ -408,31 +496,68 @@ export default function AttendanceTracker({
           <div className="flex items-center gap-1.5 pl-2 border-l border-zinc-200">
             <span className="w-2.5 h-2.5 rounded-full bg-purple-500" />
             <span className="text-zinc-600">Emprestados:</span>
-            <strong className={`px-1.5 py-0.2 rounded font-black ${dayStats.loaned > 0 ? 'bg-purple-100 text-purple-800' : 'text-zinc-900'}`}>
-              {dayStats.loaned}
+            <strong className={`px-2 py-0.5 rounded-lg font-black ${dayStats.loanedTotal > 0 ? 'bg-purple-100 text-purple-900 border border-purple-200' : 'text-zinc-900'}`}>
+              {dayStats.loanedTotal}
             </strong>
           </div>
         </div>
 
-        {/* Filter by loaned toggle */}
-        <div className="flex items-center gap-1.5">
-          <button
-            type="button"
-            onClick={() => setFilterOnlyLoaned(!filterOnlyLoaned)}
-            className={`px-3 py-1 rounded-lg text-xs font-bold transition-all flex items-center gap-1.5 border ${
-              filterOnlyLoaned
-                ? 'bg-purple-600 text-white border-purple-600 shadow-xs'
-                : 'bg-white text-zinc-600 border-zinc-200 hover:bg-zinc-100'
-            }`}
-          >
-            <ArrowRightLeft size={13} />
-            <span>{filterOnlyLoaned ? 'Mostrando Apenas Emprestados' : 'Filtrar Emprestados'}</span>
-            {dayStats.loaned > 0 && (
-              <span className={`px-1.5 py-0.2 rounded-full text-[10px] ${filterOnlyLoaned ? 'bg-purple-800 text-white' : 'bg-purple-100 text-purple-700'}`}>
-                {dayStats.loaned}
-              </span>
+        {/* Loan Filter & Borrow Quick Action */}
+        <div className="flex flex-wrap items-center gap-2">
+          <div className="flex items-center p-0.5 bg-zinc-200/60 rounded-xl border border-zinc-200 text-xs">
+            <button
+              type="button"
+              onClick={() => setFilterLoanedMode('all')}
+              className={`px-2.5 py-1 rounded-lg font-bold transition-all ${filterLoanedMode === 'all' ? 'bg-white text-zinc-900 shadow-2xs' : 'text-zinc-600 hover:text-zinc-900'}`}
+            >
+              Todos
+            </button>
+            {dayStats.loanedIn > 0 && (
+              <button
+                type="button"
+                onClick={() => setFilterLoanedMode('loaned-in')}
+                className={`px-2.5 py-1 rounded-lg font-bold transition-all flex items-center gap-1 ${filterLoanedMode === 'loaned-in' ? 'bg-emerald-600 text-white shadow-2xs' : 'text-emerald-700 hover:text-emerald-900'}`}
+                title="Promotores de outros times emprestados para esta equipe"
+              >
+                <span>🌟 Recebidos</span>
+                <span className="px-1 rounded-full text-[10px] bg-emerald-700 text-white font-extrabold">{dayStats.loanedIn}</span>
+              </button>
             )}
-          </button>
+            {dayStats.loanedOut > 0 && (
+              <button
+                type="button"
+                onClick={() => setFilterLoanedMode('loaned-out')}
+                className={`px-2.5 py-1 rounded-lg font-bold transition-all flex items-center gap-1 ${filterLoanedMode === 'loaned-out' ? 'bg-purple-600 text-white shadow-2xs' : 'text-purple-700 hover:text-purple-900'}`}
+                title="Promotores desta equipe emprestados para outros times"
+              >
+                <span>✈️ Enviados</span>
+                <span className="px-1 rounded-full text-[10px] bg-purple-700 text-white font-extrabold">{dayStats.loanedOut}</span>
+              </button>
+            )}
+            {dayStats.loanedTotal > 0 && (
+              <button
+                type="button"
+                onClick={() => setFilterLoanedMode('only-loaned')}
+                className={`px-2.5 py-1 rounded-lg font-bold transition-all flex items-center gap-1 ${filterLoanedMode === 'only-loaned' ? 'bg-purple-700 text-white shadow-2xs' : 'text-zinc-600 hover:text-purple-700'}`}
+              >
+                <span>Emprestados</span>
+                <span className="px-1 rounded-full text-[10px] bg-purple-100 text-purple-800 font-extrabold">{dayStats.loanedTotal}</span>
+              </button>
+            )}
+          </div>
+
+          {/* Quick button to borrow from another team */}
+          {selectedTeam && selectedTeam !== 'all' && !readOnly && (
+            <button
+              type="button"
+              onClick={() => setShowBorrowModal(true)}
+              className="inline-flex items-center gap-1 px-3 py-1.5 rounded-xl bg-purple-600 hover:bg-purple-700 text-white font-bold text-xs shadow-xs transition-all active:scale-95 cursor-pointer"
+              title="Trazer promotor de outra equipe para trabalhar nesta equipe hoje"
+            >
+              <ArrowRightLeft size={13} />
+              <span>+ Trazer Emprestado</span>
+            </button>
+          )}
         </div>
       </div>
 
@@ -535,12 +660,31 @@ export default function AttendanceTracker({
                               <span>⭐</span> Supervisora (+R$ {(promoter.supervisorBonus ?? 30).toFixed(2)})
                             </span>
                           )}
-                          {attendance?.isLoaned && (
-                            <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[9px] font-extrabold uppercase tracking-wider bg-purple-100 text-purple-800 border border-purple-200 shadow-2xs">
-                              <ArrowRightLeft size={10} />
-                              Emprestado ➔ {getTeamDisplay(attendance.loanedToTeam || getDefaultDestinationTeam(promoter.team), teamsList).name}
-                            </span>
-                          )}
+                          {attendance?.isLoaned && (() => {
+                            const homeTeam = promoter.team ? normalizeTeamId(promoter.team) : 'flash';
+                            const isIncoming = Boolean(selectedTeam && selectedTeam !== 'all' && isSameTeam(attendance.loanedToTeam, selectedTeam) && !isSameTeam(homeTeam, selectedTeam));
+                            const originDisplay = getTeamDisplay(attendance.loanedFromTeam || homeTeam, teamsList);
+                            const targetDisplay = getTeamDisplay(attendance.loanedToTeam || getDefaultDestinationTeam(homeTeam), teamsList);
+                            
+                            if (isIncoming) {
+                              return (
+                                <span className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-[9px] font-black uppercase tracking-wider bg-emerald-100 text-emerald-900 border border-emerald-300 shadow-2xs">
+                                  <span>🌟</span>
+                                  <span>Emprestado de: {originDisplay.icon} {originDisplay.name}</span>
+                                </span>
+                              );
+                            }
+
+                            return (
+                              <span className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-[9px] font-black uppercase tracking-wider bg-purple-100 text-purple-900 border border-purple-300 shadow-2xs">
+                                <ArrowRightLeft size={10} className="text-purple-700" />
+                                <span>Emprestado para:</span>
+                                <span className="font-extrabold text-purple-950 underline decoration-purple-400">
+                                  {targetDisplay.icon} {targetDisplay.name}
+                                </span>
+                              </span>
+                            );
+                          })()}
                         </div>
                         <div className="text-[10px] font-bold text-zinc-400 uppercase tracking-wider mt-0.5">{promoter.document}</div>
                       </div>
@@ -687,47 +831,66 @@ export default function AttendanceTracker({
                     )}
                   </td>
 
-                  {/* Loaned Checkbox & Destination Team Selection */}
+                  {/* Loaned Column: Clear, Prominent, 1-Click Team Selection */}
                   <td className="px-6 py-4 text-center">
-                    <div className="flex flex-col items-center gap-1.5">
-                      <label className={`inline-flex items-center gap-2 px-3 py-1.5 rounded-xl border transition-all cursor-pointer select-none ${
-                        attendance?.isLoaned
-                          ? 'bg-purple-100 text-purple-800 border-purple-300 font-bold shadow-2xs'
-                          : 'bg-zinc-50 text-zinc-500 border-zinc-200 hover:bg-zinc-100 font-medium'
-                      } ${readOnly ? 'opacity-50 pointer-events-none' : ''}`}>
-                        <input 
-                          type="checkbox"
-                          disabled={readOnly}
-                          checked={Boolean(attendance?.isLoaned)}
-                          onChange={(e) => toggleLoaned(promoter.id, e.target.checked)}
-                          className="h-4 w-4 rounded border-zinc-300 text-purple-600 focus:ring-purple-500 cursor-pointer"
-                        />
-                        <span className="text-xs">
-                          {attendance?.isLoaned ? 'Sim (Emprestado)' : 'Não'}
-                        </span>
-                      </label>
-
-                      {attendance?.isLoaned && (
-                        <div className="flex items-center gap-1 bg-purple-50 px-2 py-1 rounded-lg border border-purple-200 shadow-2xs">
-                          <span className="text-[10px] font-black text-purple-700 uppercase tracking-wider">Para:</span>
-                          <select
-                            disabled={readOnly}
-                            value={attendance.loanedToTeam || getDefaultDestinationTeam(promoter.team)}
-                            onChange={(e) => changeLoanedTeam(promoter.id, e.target.value)}
-                            className="text-[11px] font-bold bg-white text-purple-900 border border-purple-300 rounded px-1.5 py-0.5 shadow-2xs focus:outline-none focus:ring-1 focus:ring-purple-500 cursor-pointer"
-                            title="Selecione a equipe de destino onde este valor será calculado em adiantamento"
-                          >
-                            {teamsList
-                              .filter(t => t.id !== (promoter.team || 'flash'))
-                              .map(t => (
-                                <option key={t.id} value={t.id}>
-                                  {t.icon || '👥'} {t.name}
-                                </option>
-                              ))}
-                          </select>
+                    {attendance?.isLoaned ? (
+                      <div className="inline-flex flex-col items-center gap-1.5 p-2 bg-purple-50/95 border-2 border-purple-300 rounded-2xl shadow-sm min-w-[210px]">
+                        <div className="flex items-center justify-between w-full px-1">
+                          <span className="text-[10px] font-black uppercase tracking-wider text-purple-900 flex items-center gap-1">
+                            <ArrowRightLeft size={12} className="text-purple-700" />
+                            Emprestado para:
+                          </span>
+                          {!readOnly && (
+                            <button 
+                              type="button"
+                              onClick={() => toggleLoaned(promoter.id, false)}
+                              className="text-[10px] text-zinc-400 hover:text-red-600 font-bold px-1.5 py-0.5 rounded-md hover:bg-white transition-colors border border-transparent hover:border-red-200 cursor-pointer"
+                              title="Remover empréstimo (devolver à equipe original)"
+                            >
+                              ✕ Cancelar
+                            </button>
+                          )}
                         </div>
-                      )}
-                    </div>
+
+                        {/* Team Buttons (Immediate 1-Click Selection) */}
+                        <div className="flex flex-wrap items-center justify-center gap-1 w-full pt-0.5">
+                          {teamsList
+                            .filter(t => !isSameTeam(t.id, promoter.team))
+                            .map(t => {
+                              const isTarget = isSameTeam(attendance.loanedToTeam || getDefaultDestinationTeam(promoter.team), t.id);
+                              const style = getTeamColorStyle(t.color);
+                              return (
+                                <button
+                                  key={t.id}
+                                  type="button"
+                                  disabled={readOnly}
+                                  onClick={() => changeLoanedTeam(promoter.id, t.id)}
+                                  className={`px-2.5 py-1 rounded-xl text-xs font-black transition-all flex items-center gap-1 border cursor-pointer ${
+                                    isTarget
+                                      ? `${style.badge} shadow-sm scale-105 ring-2 ring-purple-500 font-extrabold`
+                                      : 'bg-white text-zinc-700 border-zinc-200 hover:bg-zinc-100 hover:border-zinc-300'
+                                  }`}
+                                  title={`Emprestar para ${t.name}`}
+                                >
+                                  <span>{t.icon || '👥'}</span>
+                                  <span>{t.name}</span>
+                                </button>
+                              );
+                            })}
+                        </div>
+                      </div>
+                    ) : (
+                      <button
+                        type="button"
+                        disabled={readOnly}
+                        onClick={() => toggleLoaned(promoter.id, true)}
+                        className="inline-flex items-center gap-1.5 px-3.5 py-1.5 rounded-xl border border-zinc-200 bg-zinc-50 hover:bg-purple-50 hover:text-purple-800 hover:border-purple-300 text-xs font-bold text-zinc-600 transition-all cursor-pointer shadow-2xs hover:shadow-xs active:scale-95 disabled:opacity-50"
+                        title="Emprestar este promotor para outra equipe nesta data"
+                      >
+                        <ArrowRightLeft size={13} className="text-zinc-400" />
+                        <span>Emprestar</span>
+                      </button>
+                    )}
                   </td>
 
                   {/* Admin Only: Payment Status */}
@@ -757,12 +920,104 @@ export default function AttendanceTracker({
 
         {visiblePromoters.length === 0 && (
           <div className="p-16 text-center text-zinc-500 font-medium">
-            {filterOnlyLoaned 
-              ? 'Nenhum promotor emprestado nesta data.' 
+            {filterLoanedMode === 'only-loaned' || filterLoanedMode === 'loaned-in' || filterLoanedMode === 'loaned-out'
+              ? 'Nenhum promotor emprestado encontrado com os filtros selecionados nesta data.' 
               : 'Nenhum promotor cadastrado para registrar presença nesta equipe.'}
           </div>
         )}
       </div>
+
+      {/* Modal to borrow a promoter from another team into the currently viewed team */}
+      {showBorrowModal && selectedTeam && selectedTeam !== 'all' && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-zinc-950/50 backdrop-blur-xs">
+          <div className="bg-white rounded-3xl shadow-2xl border border-zinc-200 w-full max-w-md p-6 animate-in fade-in zoom-in-95 duration-200">
+            <div className="flex items-start justify-between mb-4">
+              <div className="flex items-center gap-2.5">
+                <div className="p-2.5 rounded-xl bg-purple-100 text-purple-700">
+                  <ArrowRightLeft size={20} />
+                </div>
+                <div>
+                  <h3 className="font-extrabold text-zinc-900 text-base leading-tight">
+                    Trazer Promotor Emprestado
+                  </h3>
+                  <p className="text-xs text-zinc-500 font-medium">
+                    Para: <strong className="text-purple-900">{getTeamDisplay(selectedTeam, teamsList).name}</strong> em {selectedDate}
+                  </p>
+                </div>
+              </div>
+              <button 
+                type="button" 
+                onClick={() => setShowBorrowModal(false)}
+                className="p-1 rounded-lg text-zinc-400 hover:text-zinc-600 hover:bg-zinc-100 transition-colors"
+              >
+                <X size={18} />
+              </button>
+            </div>
+
+            <p className="text-xs text-zinc-600 mb-3">
+              Selecione abaixo um promotor de outra equipe para trabalhar nesta equipe hoje. Ele será marcado como presente e contabilizado para esta equipe:
+            </p>
+
+            <div className="max-h-72 overflow-y-auto space-y-1.5 p-1">
+              {borrowCandidates.map(c => {
+                const home = c.team ? normalizeTeamId(c.team) : 'flash';
+                const teamDisp = getTeamDisplay(home, teamsList);
+                const att = attendanceData[c.id];
+                const alreadyLoanedHere = Boolean(att?.isLoaned && isSameTeam(att.loanedToTeam, selectedTeam));
+
+                return (
+                  <div 
+                    key={c.id}
+                    className="flex items-center justify-between p-2.5 rounded-xl border border-zinc-200 hover:border-purple-300 hover:bg-purple-50/50 transition-all"
+                  >
+                    <div>
+                      <div className="font-bold text-xs text-zinc-900 leading-tight">{c.name}</div>
+                      <div className="flex items-center gap-1.5 mt-0.5">
+                        <span className="text-[10px] font-bold text-zinc-500 uppercase">{c.document}</span>
+                        <span className="text-[10px] text-zinc-400">•</span>
+                        <span className="text-[10px] font-black text-zinc-700">{teamDisp.icon} {teamDisp.name}</span>
+                      </div>
+                    </div>
+
+                    {alreadyLoanedHere ? (
+                      <span className="px-2.5 py-1 rounded-lg bg-emerald-100 text-emerald-800 text-[10px] font-black">
+                        ✓ Já nesta equipe
+                      </span>
+                    ) : (
+                      <button
+                        type="button"
+                        onClick={async () => {
+                          await toggleLoaned(c.id, true, selectedTeam);
+                          setShowBorrowModal(false);
+                        }}
+                        className="px-3 py-1.5 rounded-xl bg-purple-600 hover:bg-purple-700 text-white font-extrabold text-xs shadow-xs transition-all active:scale-95 cursor-pointer"
+                      >
+                        Emprestar para cá
+                      </button>
+                    )}
+                  </div>
+                );
+              })}
+
+              {borrowCandidates.length === 0 && (
+                <div className="p-6 text-center text-xs text-zinc-500">
+                  Nenhum promotor de outra equipe disponível.
+                </div>
+              )}
+            </div>
+
+            <div className="mt-4 pt-3 border-t border-zinc-100 flex justify-end">
+              <button
+                type="button"
+                onClick={() => setShowBorrowModal(false)}
+                className="px-4 py-2 rounded-xl text-xs font-bold text-zinc-600 hover:bg-zinc-100 transition-colors cursor-pointer"
+              >
+                Fechar
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

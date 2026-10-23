@@ -12,7 +12,7 @@ import { Promoter, Advance, OperationType, Attendance } from '../types';
 import { handleFirestoreError, formatCurrency, formatDate, getStartOfWeekSaoPaulo, getTodaySaoPaulo } from '../lib/utils';
 import { exportPromoterAdvancesToExcel, exportPromoterAdvancesToCSV, exportBatchPaymentToExcel, exportBatchPaymentToCSV, BatchPaymentRow, roundCurrency } from '../lib/excelExport';
 import { BatchExportModal } from './BatchExportModal';
-import { useTeams, getTeamDisplay } from '../lib/teams';
+import { useTeams, getTeamDisplay, isSameTeam, normalizeTeamId } from '../lib/teams';
 
 interface AdvanceManagerProps {
   promoters: Promoter[];
@@ -46,20 +46,20 @@ export default function AdvanceManager({ promoters, selectedTeam = 'all', readOn
     if (!teamId || teamId === 'all') return true;
     if (att.isLoaned) {
       // Se emprestado, pertence à equipe de destino para cálculo de adiantamento
-      return att.loanedToTeam === teamId;
+      return isSameTeam(att.loanedToTeam, teamId);
     }
     const homeTeam = promoter.team || 'flash';
-    return homeTeam === teamId;
+    return isSameTeam(homeTeam, teamId);
   };
 
   // HELPER: Determine if an advance belongs to the selected team
   const isAdvanceForTeam = (adv: Advance, promoter: Promoter, teamId?: string) => {
     if (!teamId || teamId === 'all') return true;
     if (adv.team) {
-      return adv.team === teamId;
+      return isSameTeam(adv.team, teamId);
     }
     const homeTeam = promoter.team || 'flash';
-    return homeTeam === teamId;
+    return isSameTeam(homeTeam, teamId);
   };
 
   // HELPER: Value per shift / hour (R$ 20,00/h, meia hora 0.5 = R$ 10,00) + bônus de supervisão
@@ -93,13 +93,13 @@ export default function AdvanceManager({ promoters, selectedTeam = 'all', readOn
     if (!selectedTeam || selectedTeam === 'all') return promoters;
     return promoters.filter(p => {
       const homeTeam = p.team || 'flash';
-      if (homeTeam === selectedTeam) return true;
+      if (isSameTeam(homeTeam, selectedTeam)) return true;
       // Promotor de outra equipe que foi emprestado para esta equipe
       const promoterAtt = attendanceMap[p.id] || [];
-      const hasLoanedToTeam = promoterAtt.some(att => att.isLoaned && att.loanedToTeam === selectedTeam);
+      const hasLoanedToTeam = promoterAtt.some(att => att.isLoaned && isSameTeam(att.loanedToTeam, selectedTeam));
       if (hasLoanedToTeam) return true;
       const promoterAdv = advancesMap[p.id] || [];
-      return promoterAdv.some(adv => adv.team === selectedTeam);
+      return promoterAdv.some(adv => isSameTeam(adv.team, selectedTeam));
     });
   }, [promoters, selectedTeam, attendanceMap, advancesMap]);
 
@@ -411,7 +411,7 @@ export default function AdvanceManager({ promoters, selectedTeam = 'all', readOn
     if (net < 0.01) return;
 
     const homeTeam = promoter.team || 'flash';
-    const isLoanedIn = Boolean(selectedTeam && selectedTeam !== 'all' && homeTeam !== selectedTeam);
+    const isLoanedIn = Boolean(selectedTeam && selectedTeam !== 'all' && !isSameTeam(homeTeam, selectedTeam));
     const targetTeam = selectedTeam !== 'all' ? selectedTeam : homeTeam;
 
     if (!window.confirm(`Deseja QUITAR o pagamento para ${promoter.name}${isLoanedIn ? ` (Emprestado de ${getTeamDisplay(homeTeam, teams).name})` : ''}?\nValor: ${formatCurrency(net)}`)) return;
@@ -639,7 +639,7 @@ export default function AdvanceManager({ promoters, selectedTeam = 'all', readOn
             tipo: prom?.pixKeyType || 'CPF',
             nome: a.promoterName || prom?.name || 'Promotor',
             documento: prom?.document || '',
-            equipe: prom?.team === 'rapidao' ? 'Time Rapidão' : 'Time Flash',
+            equipe: getTeamDisplay(a.team || prom?.team, teams).name,
             data: a.date,
             motivo: a.notes || 'Adiantamento',
           });
@@ -660,7 +660,7 @@ export default function AdvanceManager({ promoters, selectedTeam = 'all', readOn
               tipo: p.pixKeyType || 'CPF',
               nome: p.name || '',
               documento: p.document || '',
-              equipe: p.team === 'rapidao' ? 'Time Rapidão' : 'Time Flash',
+              equipe: getTeamDisplay(selectedTeam !== 'all' ? selectedTeam : p.team, teams).name,
               data: formatDate(new Date()),
               motivo: 'Adiantamento Semanal / Diárias',
             });
@@ -680,7 +680,7 @@ export default function AdvanceManager({ promoters, selectedTeam = 'all', readOn
             tipo: prom.pixKeyType || 'CPF',
             nome: prom.name || '',
             documento: prom.document || '',
-            equipe: prom.team === 'rapidao' ? 'Time Rapidão' : 'Time Flash',
+            equipe: getTeamDisplay(item.advance?.team || (selectedTeam !== 'all' ? selectedTeam : prom.team), teams).name,
             data: item.date || formatDate(new Date()),
             motivo: item.type === 'balance' ? 'Adiantamento Semanal / Diárias' : (item.advance?.notes || 'Adiantamento'),
           });
@@ -700,7 +700,7 @@ export default function AdvanceManager({ promoters, selectedTeam = 'all', readOn
             tipo: p.pixKeyType || 'CPF',
             nome: p.name || '',
             documento: p.document || '',
-            equipe: p.team === 'rapidao' ? 'Time Rapidão' : 'Time Flash',
+            equipe: getTeamDisplay(selectedTeam !== 'all' ? selectedTeam : p.team, teams).name,
             data: formatDate(new Date()),
             motivo: 'Adiantamento Semanal / Diárias',
           });
@@ -718,7 +718,7 @@ export default function AdvanceManager({ promoters, selectedTeam = 'all', readOn
             tipo: prom?.pixKeyType || 'CPF',
             nome: a.promoterName || prom?.name || 'Promotor',
             documento: prom?.document || '',
-            equipe: prom?.team === 'rapidao' ? 'Time Rapidão' : 'Time Flash',
+            equipe: getTeamDisplay(a.team || prom?.team, teams).name,
             data: a.date,
             motivo: a.notes || 'Adiantamento',
           });
@@ -868,13 +868,19 @@ export default function AdvanceManager({ promoters, selectedTeam = 'all', readOn
     const list = visiblePromoters
       .map(p => {
         const net = getPendingBalance(p.id);
-        const homeTeam = p.team || 'flash';
-        const isLoanedIn = Boolean(selectedTeam && selectedTeam !== 'all' && homeTeam !== selectedTeam);
-        return { p, net, isLoanedIn, homeTeam };
+        const homeTeam = p.team ? normalizeTeamId(p.team) : 'flash';
+        const isLoanedIn = Boolean(selectedTeam && selectedTeam !== 'all' && !isSameTeam(homeTeam, selectedTeam));
+        const promoterAtt = attendanceMap[p.id] || [];
+        const unpaidLoanedAtt = promoterAtt.find(att => att.paymentStatus !== 'paid' && att.status !== 'absent' && att.isLoaned);
+        const targetTeam = isLoanedIn ? selectedTeam : unpaidLoanedAtt?.loanedToTeam;
+        const isAnyLoan = isLoanedIn || Boolean(unpaidLoanedAtt);
+        return { p, net, isAnyLoan, homeTeam, targetTeam };
       })
       .filter(i => i.net > 0.01)
       .map(i => {
-        const loanedNote = i.isLoanedIn ? ` (Emprestado de ${getTeamDisplay(i.homeTeam, teams).name})` : '';
+        const loanedNote = i.isAnyLoan 
+          ? ` (Emprestado de ${getTeamDisplay(i.homeTeam, teams).name}${i.targetTeam ? ` ➔ para ${getTeamDisplay(i.targetTeam, teams).name}` : ''})` 
+          : '';
         return `NOME: ${i.p.name}${loanedNote}\nCPF: ${i.p.document}\nPIX (${i.p.pixKeyType}): ${i.p.pixKey}\nVALOR: ${formatCurrency(i.net)}`;
       })
       .join('\n\n---\n\n');
@@ -896,8 +902,12 @@ export default function AdvanceManager({ promoters, selectedTeam = 'all', readOn
                            (p.document || '').includes(searchTerm);
                            
       if (net >= 0.01 && matchesSearch && (p.active || net >= 0.01)) {
-        const homeTeam = p.team || 'flash';
-        const isLoanedIn = Boolean(selectedTeam && selectedTeam !== 'all' && homeTeam !== selectedTeam);
+        const homeTeam = p.team ? normalizeTeamId(p.team) : 'flash';
+        const promoterAtt = attendanceMap[p.id] || [];
+        const unpaidLoanedAtt = promoterAtt.find(att => att.paymentStatus !== 'paid' && att.status !== 'absent' && att.isLoaned);
+        const isLoanedIn = Boolean(selectedTeam && selectedTeam !== 'all' ? !isSameTeam(homeTeam, selectedTeam) : unpaidLoanedAtt);
+        const targetTeam = isLoanedIn ? (selectedTeam && selectedTeam !== 'all' ? selectedTeam : unpaidLoanedAtt?.loanedToTeam) : undefined;
+        const originTeam = isLoanedIn ? (unpaidLoanedAtt?.loanedFromTeam || homeTeam) : undefined;
 
         list.push({
           id: `balance-${p.id}`,
@@ -908,7 +918,8 @@ export default function AdvanceManager({ promoters, selectedTeam = 'all', readOn
           date: formatDate(new Date()),
           type: 'balance',
           isLoaned: isLoanedIn,
-          loanedFromTeam: isLoanedIn ? homeTeam : undefined
+          loanedFromTeam: originTeam,
+          loanedToTeam: targetTeam
         });
       }
     });
@@ -922,8 +933,8 @@ export default function AdvanceManager({ promoters, selectedTeam = 'all', readOn
                              (promoter?.document || '').includes(searchTerm) ||
                              (a.notes?.toLowerCase() || '').includes(searchTerm.toLowerCase());
         if (matchesSearch) {
-          const homeTeam = promoter?.team || 'flash';
-          const isLoanedIn = Boolean(selectedTeam && selectedTeam !== 'all' && homeTeam !== selectedTeam);
+          const homeTeam = promoter?.team ? normalizeTeamId(promoter.team) : 'flash';
+          const isLoanedIn = Boolean((selectedTeam && selectedTeam !== 'all' && !isSameTeam(homeTeam, selectedTeam)) || a.isLoaned);
 
           list.push({
             id: a.id,
@@ -934,8 +945,9 @@ export default function AdvanceManager({ promoters, selectedTeam = 'all', readOn
             status: 'pending',
             date: a.date,
             type: 'advance',
-            isLoaned: isLoanedIn || a.isLoaned,
-            loanedFromTeam: a.loanedFromTeam || (isLoanedIn ? homeTeam : undefined)
+            isLoaned: isLoanedIn,
+            loanedFromTeam: a.loanedFromTeam || homeTeam,
+            loanedToTeam: a.team || (selectedTeam !== 'all' ? selectedTeam : undefined)
           });
         }
       });
@@ -1436,9 +1448,12 @@ export default function AdvanceManager({ promoters, selectedTeam = 'all', readOn
                             <div className="flex items-center gap-2 flex-wrap">
                               <span className="font-bold text-zinc-900 leading-tight">{item.promoter?.name || '---'}</span>
                               {item.isLoaned && (
-                                <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[9px] font-extrabold uppercase tracking-wider bg-purple-100 text-purple-800 border border-purple-200 shadow-2xs">
-                                  <ArrowRightLeft size={10} />
-                                  Emprestado do {getTeamDisplay(item.loanedFromTeam || (item.promoter?.team || 'flash'), teams).name}
+                                <span className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-[9px] font-black uppercase tracking-wider bg-purple-100 text-purple-900 border border-purple-300 shadow-2xs">
+                                  <ArrowRightLeft size={10} className="text-purple-700" />
+                                  <span>Emprestado de: {getTeamDisplay(item.loanedFromTeam || (item.promoter?.team || 'flash'), teams).name}</span>
+                                  {item.loanedToTeam && (
+                                    <span>➔ Para: {getTeamDisplay(item.loanedToTeam, teams).name}</span>
+                                  )}
                                 </span>
                               )}
                             </div>
@@ -1692,6 +1707,15 @@ export default function AdvanceManager({ promoters, selectedTeam = 'all', readOn
                             <div className="text-[9px] text-zinc-500 font-bold mt-1 uppercase tracking-wider">
                               Cota: {formatCurrency(advance.amount)} • Total Pago: {formatCurrency(getTotalPaid(advance.promoterId))}
                             </div>
+                            {advance.isLoaned && (
+                              <div className="mt-1">
+                                <span className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-[9px] font-black uppercase tracking-wider bg-purple-100 text-purple-900 border border-purple-300 shadow-2xs">
+                                  <ArrowRightLeft size={10} className="text-purple-700" />
+                                  <span>Emprestado de: {getTeamDisplay(advance.loanedFromTeam || 'flash', teams).name}</span>
+                                  {advance.team && <span>➔ Destino: {getTeamDisplay(advance.team, teams).name}</span>}
+                                </span>
+                              </div>
+                            )}
                           </div>
                         </div>
                       </td>

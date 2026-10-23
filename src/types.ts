@@ -15,7 +15,7 @@ export interface Team {
 export const DEFAULT_TEAMS: Team[] = [
   { id: 'flash', name: 'Time Flash', icon: '⚡', color: 'indigo', isDefault: true },
   { id: 'rapidao', name: 'Time Rapidão', icon: '🚀', color: 'amber', isDefault: true },
-  { id: 'start', name: 'Time Start', icon: '🌟', color: 'emerald', isDefault: true },
+  { id: 'start-credito', name: 'Time Start Crédito', icon: '🌟', color: 'emerald', isDefault: true },
 ];
 
 export interface Promoter {

@@ -51,7 +51,7 @@ import {
 import { Promoter, Attendance, Advance, OperationType, AppUser, Team } from './types';
 import { handleFirestoreError, formatDate, formatCurrency } from './lib/utils';
 import { AdminSecurity } from './lib/security';
-import { useTeams, getTeamDisplay, getTeamColorStyle } from './lib/teams';
+import { useTeams, getTeamDisplay, getTeamColorStyle, isSameTeam, normalizeTeamId } from './lib/teams';
 
 // Components
 import PromoterCard from './components/PromoterCard';
@@ -98,10 +98,10 @@ export default function App() {
 
   const filteredPromoters = useMemo(() => {
     return promoters.filter(p => {
-      // Team filter
+      // Team filter (unifica start e start-credito de forma transparente)
       if (selectedTeam !== 'all') {
         const promoterTeam = p.team || 'flash';
-        if (promoterTeam !== selectedTeam) return false;
+        if (!isSameTeam(promoterTeam, selectedTeam)) return false;
       }
       // Search filter
       if (searchQuery) {
@@ -119,12 +119,12 @@ export default function App() {
     return allAttendance.filter(a => {
       // Se foi emprestado, pertence à equipe de destino
       if (a.isLoaned) {
-        return a.loanedToTeam === selectedTeam;
+        return isSameTeam(a.loanedToTeam, selectedTeam);
       }
       // Se não foi emprestado, pertence à equipe de origem do promotor
       const promoter = promoters.find(p => p.id === a.promoterId);
       const homeTeam = promoter?.team || 'flash';
-      return homeTeam === selectedTeam;
+      return isSameTeam(homeTeam, selectedTeam);
     });
   }, [allAttendance, selectedTeam, promoters]);
 
@@ -132,11 +132,11 @@ export default function App() {
     if (selectedTeam === 'all') return allAdvances;
     return allAdvances.filter(a => {
       if (a.team) {
-        return a.team === selectedTeam;
+        return isSameTeam(a.team, selectedTeam);
       }
       const promoter = promoters.find(p => p.id === a.promoterId);
       const homeTeam = promoter?.team || 'flash';
-      return homeTeam === selectedTeam;
+      return isSameTeam(homeTeam, selectedTeam);
     });
   }, [allAdvances, selectedTeam, promoters]);
 
@@ -834,7 +834,7 @@ export default function App() {
                     👥 Todos
                   </button>
                   {teams.map(t => {
-                    const isSelected = selectedTeam === t.id;
+                    const isSelected = selectedTeam !== 'all' && isSameTeam(selectedTeam, t.id);
                     const style = getTeamColorStyle(t.color);
                     return (
                       <button
@@ -875,10 +875,10 @@ export default function App() {
               <button 
                 onClick={() => setIsTeamModalOpen(true)}
                 className="inline-flex items-center justify-center gap-2 rounded-xl bg-white border border-zinc-200 px-4 py-3 text-sm font-bold text-zinc-700 transition-all hover:bg-zinc-50 hover:text-zinc-900 shadow-sm active:scale-95"
-                title="Cadastrar uma nova equipe no sistema"
+                title="Gerenciar equipes cadastradas, visualizar membros ou excluir equipes"
               >
                 <Layers size={18} className="text-indigo-600" />
-                Nova Equipe
+                Gerenciar Equipes
               </button>
               <button 
                 onClick={() => { setEditingPromoter(null); setIsPromoterModalOpen(true); }}
@@ -1020,9 +1020,12 @@ export default function App() {
               {activeTab === 'attendance' && (
                 <AttendanceTracker 
                   promoters={filteredPromoters} 
+                  allPromoters={promoters}
+                  selectedTeam={selectedTeam}
                   readOnly={userRole === 'viewer'} 
                   teams={teams} 
                   userRole={userRole}
+                  searchQuery={searchQuery}
                 />
               )}
 
@@ -1080,6 +1083,7 @@ export default function App() {
       <TeamModal
         isOpen={isTeamModalOpen}
         onClose={() => setIsTeamModalOpen(false)}
+        promoters={promoters}
       />
     </div>
   );
