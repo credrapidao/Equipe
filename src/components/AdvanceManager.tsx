@@ -372,10 +372,7 @@ export default function AdvanceManager({ promoters, selectedTeam = 'all', readOn
 
   const copyIndividual = (e: React.MouseEvent, promoter: Promoter, amount: number) => {
     e.stopPropagation();
-    const homeTeam = promoter.team || 'flash';
-    const isLoanedIn = Boolean(selectedTeam && selectedTeam !== 'all' && homeTeam !== selectedTeam);
-    const loanedNote = isLoanedIn ? ` (Emprestado de ${getTeamDisplay(homeTeam, teams).name})` : '';
-    const text = `NOME: ${promoter.name}${loanedNote}\nCPF: ${promoter.document}\nPIX (${promoter.pixKeyType}): ${promoter.pixKey}\nVALOR: ${formatCurrency(amount)}`;
+    const text = `NOME: ${promoter.name}\nCPF: ${promoter.document}\nPIX (${promoter.pixKeyType}): ${promoter.pixKey}\nVALOR: ${formatCurrency(amount)}`;
     navigator.clipboard.writeText(text).then(() => {
       setCopiedId(promoter.id);
       setTimeout(() => setCopiedId(null), 2000);
@@ -865,21 +862,10 @@ export default function AdvanceManager({ promoters, selectedTeam = 'all', readOn
     const list = visiblePromoters
       .map(p => {
         const net = getPendingBalance(p.id);
-        const homeTeam = p.team ? normalizeTeamId(p.team) : 'flash';
-        const isLoanedIn = Boolean(selectedTeam && selectedTeam !== 'all' && !isSameTeam(homeTeam, selectedTeam));
-        const promoterAtt = attendanceMap[p.id] || [];
-        const unpaidLoanedAtt = promoterAtt.find(att => att.paymentStatus !== 'paid' && att.status !== 'absent' && att.isLoaned);
-        const targetTeam = isLoanedIn ? selectedTeam : unpaidLoanedAtt?.loanedToTeam;
-        const isAnyLoan = isLoanedIn || Boolean(unpaidLoanedAtt);
-        return { p, net, isAnyLoan, homeTeam, targetTeam };
+        return { p, net };
       })
       .filter(i => i.net > 0.01)
-      .map(i => {
-        const loanedNote = i.isAnyLoan 
-          ? ` (Emprestado de ${getTeamDisplay(i.homeTeam, teams).name}${i.targetTeam ? ` ➔ para ${getTeamDisplay(i.targetTeam, teams).name}` : ''})` 
-          : '';
-        return `NOME: ${i.p.name}${loanedNote}\nCPF: ${i.p.document}\nPIX (${i.p.pixKeyType}): ${i.p.pixKey}\nVALOR: ${formatCurrency(i.net)}`;
-      })
+      .map(i => `NOME: ${i.p.name}\nCPF: ${i.p.document}\nPIX (${i.p.pixKeyType}): ${i.p.pixKey}\nVALOR: ${formatCurrency(i.net)}`)
       .join('\n\n---\n\n');
     
     if (list) {
