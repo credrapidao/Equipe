@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { User, Phone, Edit, CheckCircle2, XCircle, Coins, Key, Copy, Check, Calendar, Eye, EyeOff, Shield, Trash2, ArrowRightLeft } from 'lucide-react';
+import { User, Phone, Edit, CheckCircle2, XCircle, Coins, Key, Copy, Check, Calendar, Eye, EyeOff, Shield, Trash2, ArrowRightLeft, Award } from 'lucide-react';
 import { Employee, Team, DEFAULT_TEAMS } from '../types';
 import { SecurityMasker } from '../lib/security';
 import { getTeamDisplay, getTeamColorStyle } from '../lib/teams';
@@ -24,7 +24,8 @@ export function EmployeeCard({ employee, onEdit, onDelete, onTransfer, readOnly,
 
   const formatBRDate = (dateStr?: string) => {
     if (!dateStr) return '';
-    const [y, m, d] = dateStr.split('-');
+    const clean = dateStr.split('T')[0];
+    const [y, m, d] = clean.split('-');
     if (!y || !m || !d) return dateStr;
     return `${d}/${m}/${y}`;
   };
@@ -38,6 +39,7 @@ export function EmployeeCard({ employee, onEdit, onDelete, onTransfer, readOnly,
     let text = `NOME: ${employee.name}`;
     if (employee.role) text += `\nFUNÇÃO: ${employee.role}`;
     if (employee.level) text += `\nNÍVEL: ${employee.level}`;
+    if (employee.promotionDate) text += `\nÚLTIMA PROMOÇÃO / ALT. CARGO: ${formatBRDate(employee.promotionDate)}`;
     text += `\nCPF: ${employee.document}\nPIX (${employee.pixKeyType}): ${employee.pixKey}\nSALÁRIO: ${formatCurrency(employee.baseSalary)}`;
     if (employee.admissionDate) {
       text += `\nADMISSÃO: ${formatBRDate(employee.admissionDate)}`;
@@ -157,19 +159,30 @@ export function EmployeeCard({ employee, onEdit, onDelete, onTransfer, readOnly,
           </div>
         </div>
 
-        {(employee.admissionDate || employee.dismissalDate) && (
-          <div className="col-span-2 space-y-1 border-t border-zinc-50 pt-2 flex items-center justify-between text-[11px]">
-            {employee.admissionDate && (
-              <span className="flex items-center gap-1 text-zinc-600 font-medium">
-                <Calendar size={12} className="text-indigo-500" />
-                <span className="text-[10px] uppercase font-bold text-zinc-400">Admissão:</span> {formatBRDate(employee.admissionDate)}
-              </span>
-            )}
-            {employee.dismissalDate && (
-              <span className="flex items-center gap-1 text-red-600 font-medium ml-auto">
-                <Calendar size={12} className="text-red-400" />
-                <span className="text-[10px] uppercase font-bold text-red-400">Demissão:</span> {formatBRDate(employee.dismissalDate)}
-              </span>
+        {(employee.admissionDate || employee.dismissalDate || employee.promotionDate || employee.updatedAt) && (
+          <div className="col-span-2 space-y-1.5 border-t border-zinc-50 pt-2 text-[11px]">
+            <div className="flex items-center justify-between flex-wrap gap-2">
+              {employee.admissionDate && (
+                <span className="flex items-center gap-1 text-zinc-600 font-medium">
+                  <Calendar size={12} className="text-indigo-500" />
+                  <span className="text-[10px] uppercase font-bold text-zinc-400">Admissão:</span> {formatBRDate(employee.admissionDate)}
+                </span>
+              )}
+              {employee.dismissalDate && (
+                <span className="flex items-center gap-1 text-red-600 font-medium ml-auto">
+                  <Calendar size={12} className="text-red-400" />
+                  <span className="text-[10px] uppercase font-bold text-red-400">Demissão:</span> {formatBRDate(employee.dismissalDate)}
+                </span>
+              )}
+            </div>
+            {(employee.promotionDate || employee.updatedAt) && (
+              <div className="flex items-center gap-1 text-indigo-700 font-semibold">
+                <Award size={12} className="text-indigo-500 shrink-0" />
+                <span className="text-[10px] uppercase font-bold text-zinc-400">
+                  {employee.promotionDate ? 'Alt. Cargo:' : 'Últ. Alt.:'}
+                </span>
+                <span>{formatBRDate(employee.promotionDate || employee.updatedAt)}</span>
+              </div>
             )}
           </div>
         )}

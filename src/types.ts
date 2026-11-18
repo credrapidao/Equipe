@@ -35,11 +35,20 @@ export interface Promoter {
   updatedAt?: string;
 }
 
+export interface EmployeePromotionRecord {
+  date: string; // YYYY-MM-DD
+  role?: string;
+  level?: 'Trainee' | 'Júnior' | 'Pleno' | 'Sênior' | string;
+  notes?: string;
+}
+
 export interface Employee {
   id: string;
   name: string;
   role?: string;
   level?: 'Trainee' | 'Júnior' | 'Pleno' | 'Sênior' | string;
+  promotionDate?: string; // Data da última promoção / alteração do cargo (YYYY-MM-DD)
+  promotionHistory?: EmployeePromotionRecord[]; // Histórico de promoções (ex: quando virou Júnior, Pleno, Sênior)
   document: string;
   pixKey: string;
   pixKeyType: 'CPF' | 'CNPJ' | 'Email' | 'Phone' | 'Random';

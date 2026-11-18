@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useMemo } from 'react';
-import { Users, CalendarX, Wallet, ClipboardCheck, Plus, Search, Edit, Key, X, Trash2, AlertTriangle, CheckCircle2, ArrowRightLeft, Layers, UserCheck, FileSpreadsheet } from 'lucide-react';
+import { Users, CalendarX, Wallet, ClipboardCheck, Plus, Search, Edit, Key, X, Trash2, AlertTriangle, CheckCircle2, ArrowRightLeft, Layers, UserCheck, FileSpreadsheet, Award, Clock } from 'lucide-react';
 import { db } from '../lib/firebase';
 import { collection, query, orderBy, onSnapshot, getDocs, writeBatch, doc } from 'firebase/firestore';
 import { Employee, EmployeeAbsence, EmployeeAdvance, OperationType, Team, DEFAULT_TEAMS } from '../types';
@@ -25,9 +25,24 @@ export function EmployeeManager({ readOnly, userTeam = 'all' }: EmployeeManagerP
 
   const formatBRDate = (dateStr?: string) => {
     if (!dateStr) return '-';
-    const [y, m, d] = dateStr.split('-');
+    const clean = dateStr.split('T')[0];
+    const [y, m, d] = clean.split('-');
     if (!y || !m || !d) return dateStr;
     return `${d}/${m}/${y}`;
+  };
+
+  const getLevelBadgeClass = (level?: string) => {
+    switch (level) {
+      case 'Sênior':
+        return 'bg-amber-50 text-amber-800 border-amber-200';
+      case 'Pleno':
+        return 'bg-purple-50 text-purple-800 border-purple-200';
+      case 'Júnior':
+        return 'bg-blue-50 text-blue-700 border-blue-200';
+      case 'Trainee':
+      default:
+        return 'bg-zinc-100 text-zinc-600 border-zinc-200';
+    }
   };
 
   const [allAbsences, setAllAbsences] = useState<EmployeeAbsence[]>([]);
@@ -185,7 +200,7 @@ export function EmployeeManager({ readOnly, userTeam = 'all' }: EmployeeManagerP
       const normName = normalize(emp.name);
       const cleanDoc = emp.document.replace(/\D/g, '');
       const cleanQueryDoc = rawQuery.replace(/\D/g, '');
-      const normRole = normalize(emp.role || '');
+      const normRole = normalize(`${emp.role || ''} ${emp.level || ''}`);
 
       // Direct match
       if (normName.includes(normQuery)) return true;
@@ -478,6 +493,7 @@ export function EmployeeManager({ readOnly, userTeam = 'all' }: EmployeeManagerP
                         <thead>
                           <tr className="bg-zinc-50/30 border-b border-zinc-100 text-[10px] font-bold uppercase tracking-wider text-zinc-400">
                             <th className="px-5 py-3.5">Nome</th>
+                            <th className="px-5 py-3.5">Cargo / Promoção</th>
                             <th className="px-5 py-3.5">CPF</th>
                             <th className="px-5 py-3.5">Celular</th>
                             <th className="px-5 py-3.5 text-right">Salário Base</th>
@@ -490,13 +506,15 @@ export function EmployeeManager({ readOnly, userTeam = 'all' }: EmployeeManagerP
                         <tbody className="divide-y divide-zinc-100 text-xs text-zinc-600">
                           {teamEmployees.length === 0 ? (
                             <tr>
-                              <td colSpan={8} className="text-center py-8 text-zinc-400 font-bold">
+                              <td colSpan={9} className="text-center py-8 text-zinc-400 font-bold">
                                 Nenhum funcionário cadastrado em {team.name}.
                               </td>
                             </tr>
                           ) : (
                             teamEmployees.map(emp => {
                               const isSplit = emp.team === 'both';
+                              const lastChangeDate = emp.promotionDate || emp.updatedAt || '';
+                              const hasExplicitPromoDate = Boolean(emp.promotionDate);
                               return (
                                 <tr key={emp.id} className={`hover:bg-zinc-50/40 transition-colors ${!emp.active ? 'opacity-60 bg-zinc-50/10' : ''}`}>
                                   <td className="px-5 py-3.5 font-bold text-zinc-900">
@@ -521,6 +539,60 @@ export function EmployeeManager({ readOnly, userTeam = 'all' }: EmployeeManagerP
                                         <span className="inline-block w-fit text-[9px] font-bold text-purple-700 bg-purple-50 px-1.5 py-0.5 rounded border border-purple-100">
                                           ⚡🚀 Divisão 50/50
                                         </span>
+                                      )}
+                                    </div>
+                                  </td>
+                                  <td
+                                    onClick={() => {
+                                      if (!readOnly) {
+                                        setEditingEmployee(emp);
+                                        setIsModalOpen(true);
+                                      }
+                                    }}
+                                    className={`px-5 py-3.5 ${!readOnly ? 'cursor-pointer hover:bg-indigo-50/50 transition-colors' : ''}`}
+                                    title={!readOnly ? 'Clique para editar cargo ou registrar data de promoção' : undefined}
+                                  >
+                                    <div className="flex flex-col gap-1">
+                                      <div className="flex items-center gap-1.5 flex-wrap">
+                                        {emp.role ? (
+                                          <span className="font-bold text-zinc-800">{emp.role}</span>
+                                        ) : (
+                                          <span className="text-zinc-400 italic">Cargo não definido</span>
+                                        )}
+                                        {emp.level && (
+                                          <span className={`px-1.5 py-0.5 rounded text-[10px] font-extrabold uppercase border ${getLevelBadgeClass(emp.level)}`}>
+                                            {emp.level}
+                                          </span>
+                                        )}
+                                      </div>
+
+                                      {lastChangeDate ? (
+                                        <div className={`inline-flex items-center gap-1 text-[11px] font-semibold ${hasExplicitPromoDate ? 'text-indigo-700' : 'text-zinc-500'}`}>
+                                          {hasExplicitPromoDate ? (
+                                            <Award size={11} className="text-indigo-600 shrink-0" />
+                                          ) : (
+                                            <Clock size={11} className="text-zinc-400 shrink-0" />
+                                          )}
+                                          <span>
+                                            {hasExplicitPromoDate ? 'Alt. cargo:' : 'Últ. alteração:'} {formatBRDate(lastChangeDate)}
+                                          </span>
+                                        </div>
+                                      ) : (
+                                        <span className="text-[10px] text-zinc-400 italic">Sem data de promoção</span>
+                                      )}
+
+                                      {emp.promotionHistory && emp.promotionHistory.length > 0 && (
+                                        <div className="flex items-center gap-1 flex-wrap mt-0.5">
+                                          {emp.promotionHistory.map((h, i) => (
+                                            <span
+                                              key={`${h.date}-${h.level}-${i}`}
+                                              className="text-[9px] font-bold bg-zinc-100 text-zinc-600 border border-zinc-200 px-1.5 py-0.5 rounded"
+                                              title={`${h.role || emp.role || 'Cargo'} (${h.level || '-'}) em ${formatBRDate(h.date)}`}
+                                            >
+                                              {h.level || h.role}: {formatBRDate(h.date)}
+                                            </span>
+                                          ))}
+                                        </div>
                                       )}
                                     </div>
                                   </td>

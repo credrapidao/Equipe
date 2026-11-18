@@ -711,6 +711,8 @@ export function exportEmployeesListToExcel({
     'Telefone / WhatsApp',
     'Cargo / Função',
     'Nível',
+    'Última Alt. Cargo / Promoção',
+    'Histórico de Promoções',
     'Tipo Chave PIX',
     'Chave PIX',
     'Salário Base (R$)',
@@ -735,6 +737,10 @@ export function exportEmployeesListToExcel({
     }
 
     const obs = emp.team === 'both' ? 'Divisão 50/50 entre Flash e Rapidão' : '';
+    const promoDateStr = formatBRDate(emp.promotionDate || (emp.updatedAt ? emp.updatedAt.split('T')[0] : ''));
+    const historyStr = Array.isArray(emp.promotionHistory) && emp.promotionHistory.length > 0
+      ? emp.promotionHistory.map(h => `${h.level || h.role || ''}: ${formatBRDate(h.date)}`).join(' | ')
+      : '';
 
     rows.push([
       emp.name,
@@ -743,6 +749,8 @@ export function exportEmployeesListToExcel({
       emp.phoneNumber || '',
       emp.role || '',
       emp.level || '',
+      promoDateStr,
+      historyStr,
       emp.pixKeyType || 'PIX',
       emp.pixKey || '',
       Number(emp.baseSalary || 0).toFixed(2),
@@ -755,6 +763,8 @@ export function exportEmployeesListToExcel({
   rows.push([]);
   rows.push([
     'TOTAL DA FOLHA (ATIVOS)',
+    '',
+    '',
     '',
     '',
     '',

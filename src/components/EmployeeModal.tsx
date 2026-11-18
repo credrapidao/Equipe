@@ -1,8 +1,9 @@
 import React, { useState, useEffect } from 'react';
-import { X, Save, AlertCircle, Trash2, AlertTriangle } from 'lucide-react';
+import { X, Save, AlertCircle, Trash2, AlertTriangle, Award, Calendar, Plus, History } from 'lucide-react';
 import { db } from '../lib/firebase';
 import { collection, addDoc, updateDoc, doc, getDocs, writeBatch } from 'firebase/firestore';
-import { Employee, Team, DEFAULT_TEAMS } from '../types';
+import { Employee, EmployeePromotionRecord, Team, DEFAULT_TEAMS } from '../types';
+import { getTodaySaoPaulo } from '../lib/utils';
 
 interface EmployeeModalProps {
   isOpen: boolean;
@@ -18,6 +19,8 @@ export function EmployeeModal({ isOpen, onClose, editingEmployee, onDelete, read
     name: '',
     role: '',
     level: '',
+    promotionDate: '',
+    promotionHistory: [] as EmployeePromotionRecord[],
     document: '',
     pixKey: '',
     pixKeyType: 'CPF' as Employee['pixKeyType'],
@@ -31,19 +34,42 @@ export function EmployeeModal({ isOpen, onClose, editingEmployee, onDelete, read
     supervisorBonus: 30,
     supervisorTeam: 'flash'
   });
+  const [manualPromoDateEdited, setManualPromoDateEdited] = useState(false);
+  const [autoDateReason, setAutoDateReason] = useState(false);
+  const [isAddingHistory, setIsAddingHistory] = useState(false);
+  const [newHistoryEntry, setNewHistoryEntry] = useState<EmployeePromotionRecord>({
+    date: '',
+    role: '',
+    level: ''
+  });
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [isDeleting, setIsDeleting] = useState(false);
   const [confirmingDelete, setConfirmingDelete] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
+  const formatBRDate = (dateStr?: string) => {
+    if (!dateStr) return '';
+    const clean = dateStr.split('T')[0];
+    const [y, m, d] = clean.split('-');
+    if (!y || !m || !d) return dateStr;
+    return `${d}/${m}/${y}`;
+  };
+
   useEffect(() => {
     setConfirmingDelete(false);
     setError(null);
+    setManualPromoDateEdited(false);
+    setAutoDateReason(false);
+    setIsAddingHistory(false);
+    setNewHistoryEntry({ date: '', role: '', level: '' });
+
     if (editingEmployee) {
       setFormData({
         name: editingEmployee.name,
         role: editingEmployee.role || '',
         level: editingEmployee.level || '',
+        promotionDate: editingEmployee.promotionDate || '',
+        promotionHistory: Array.isArray(editingEmployee.promotionHistory) ? [...editingEmployee.promotionHistory] : [],
         document: editingEmployee.document,
         pixKey: editingEmployee.pixKey,
         pixKeyType: editingEmployee.pixKeyType,
@@ -62,6 +88,8 @@ export function EmployeeModal({ isOpen, onClose, editingEmployee, onDelete, read
         name: '',
         role: '',
         level: '',
+        promotionDate: '',
+        promotionHistory: [],
         document: '',
         pixKey: '',
         pixKeyType: 'CPF',
@@ -80,6 +108,53 @@ export function EmployeeModal({ isOpen, onClose, editingEmployee, onDelete, read
 
   if (!isOpen) return null;
 
+  const handleRoleOrLevelChange = (field: 'role' | 'level', value: string) => {
+    setFormData(prev => {
+      const next = { ...prev, [field]: value };
+      const origRole = editingEmployee?.role || '';
+      const origLevel = editingEmployee?.level || '';
+      const changed = next.role !== origRole || next.level !== origLevel;
+
+      if (!manualPromoDateEdited) {
+        if (changed && (next.role || next.level)) {
+          next.promotionDate = getTodaySaoPaulo();
+          setAutoDateReason(true);
+        } else if (!changed) {
+          next.promotionDate = editingEmployee?.promotionDate || '';
+          setAutoDateReason(false);
+        }
+      }
+      return next;
+    });
+  };
+
+  const handleAddHistoryEntry = () => {
+    if (!newHistoryEntry.date || (!newHistoryEntry.level && !newHistoryEntry.role)) return;
+    const entry: EmployeePromotionRecord = {
+      date: newHistoryEntry.date,
+      role: (newHistoryEntry.role || formData.role || '').trim(),
+      level: newHistoryEntry.level || ''
+    };
+    setFormData(prev => {
+      const updated = [...prev.promotionHistory, entry].sort((a, b) => a.date.localeCompare(b.date));
+      const latestDate = updated[updated.length - 1]?.date || prev.promotionDate;
+      return {
+        ...prev,
+        promotionHistory: updated,
+        promotionDate: prev.promotionDate || latestDate
+      };
+    });
+    setNewHistoryEntry({ date: '', role: formData.role, level: '' });
+    setIsAddingHistory(false);
+  };
+
+  const handleRemoveHistoryEntry = (idx: number) => {
+    setFormData(prev => ({
+      ...prev,
+      promotionHistory: prev.promotionHistory.filter((_, i) => i !== idx)
+    }));
+  };
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setIsSubmitting(true);
@@ -94,10 +169,55 @@ export function EmployeeModal({ isOpen, onClose, editingEmployee, onDelete, read
 
     try {
       const parsedSalary = Number(formData.baseSalary);
+      const cleanRole = formData.role.trim();
+      const cleanLevel = formData.level;
+      const origRole = editingEmployee?.role || '';
+      const origLevel = editingEmployee?.level || '';
+      const roleOrLevelChanged = Boolean(editingEmployee) && (cleanRole !== origRole || cleanLevel !== origLevel);
+
+      let nextHistory: EmployeePromotionRecord[] = [...(formData.promotionHistory || [])];
+
+      // Preservar estado anterior no histórico caso exista data anterior e ainda não esteja listado
+      if (roleOrLevelChanged && editingEmployee && (origRole || origLevel)) {
+        const prevDate = editingEmployee.promotionDate || editingEmployee.admissionDate || '';
+        if (prevDate) {
+          const alreadyInHistory = nextHistory.some(
+            h => h.date === prevDate && (h.role || '') === origRole && (h.level || '') === origLevel
+          );
+          if (!alreadyInHistory) {
+            nextHistory.push({
+              date: prevDate,
+              role: origRole,
+              level: origLevel
+            });
+          }
+        }
+      }
+
+      const effectivePromoDate = formData.promotionDate || (roleOrLevelChanged ? getTodaySaoPaulo() : '');
+
+      // Registrar/atualizar marco atual no histórico quando houver data de promoção e cargo/nível
+      if (effectivePromoDate && (cleanRole || cleanLevel)) {
+        const alreadyExists = nextHistory.some(
+          h => h.date === effectivePromoDate && (h.role || '') === cleanRole && (h.level || '') === cleanLevel
+        );
+        if (!alreadyExists) {
+          nextHistory.push({
+            date: effectivePromoDate,
+            role: cleanRole,
+            level: cleanLevel
+          });
+        }
+      }
+
+      nextHistory.sort((a, b) => a.date.localeCompare(b.date));
+
       const dataToSave = {
         name: formData.name.trim(),
-        role: formData.role.trim(),
-        level: formData.level,
+        role: cleanRole,
+        level: cleanLevel,
+        promotionDate: effectivePromoDate,
+        promotionHistory: nextHistory,
         document: formData.document.trim(),
         pixKey: formData.pixKey.trim(),
         pixKeyType: formData.pixKeyType,
@@ -237,7 +357,7 @@ export function EmployeeModal({ isOpen, onClose, editingEmployee, onDelete, read
                 <label className="text-xs font-bold uppercase tracking-wider text-zinc-500">Função / Cargo</label>
                 <select 
                   value={formData.role}
-                  onChange={e => setFormData({ ...formData, role: e.target.value })}
+                  onChange={e => handleRoleOrLevelChange('role', e.target.value)}
                   className="w-full rounded-xl border border-zinc-200 bg-zinc-50 px-4 py-2.5 text-sm focus:border-indigo-500 focus:outline-none focus:ring-4 focus:ring-indigo-500/10 transition-all font-bold"
                 >
                   <option value="">Selecione o Cargo (Opcional)</option>
@@ -256,7 +376,7 @@ export function EmployeeModal({ isOpen, onClose, editingEmployee, onDelete, read
                 <label className="text-xs font-bold uppercase tracking-wider text-zinc-500">Nível / Senioridade</label>
                 <select 
                   value={formData.level}
-                  onChange={e => setFormData({ ...formData, level: e.target.value })}
+                  onChange={e => handleRoleOrLevelChange('level', e.target.value)}
                   className="w-full rounded-xl border border-zinc-200 bg-zinc-50 px-4 py-2.5 text-sm focus:border-indigo-500 focus:outline-none focus:ring-4 focus:ring-indigo-500/10 transition-all font-bold"
                 >
                   <option value="">Selecione o Nível (Opcional)</option>
@@ -265,6 +385,168 @@ export function EmployeeModal({ isOpen, onClose, editingEmployee, onDelete, read
                   <option value="Pleno">Pleno</option>
                   <option value="Sênior">Sênior</option>
                 </select>
+              </div>
+            </div>
+
+            {/* Promotion / Last Role Change Date + History */}
+            <div className="rounded-2xl border border-indigo-100 bg-indigo-50/40 p-4 space-y-3">
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+                <div className="space-y-1 flex-1">
+                  <div className="flex items-center justify-between gap-2 flex-wrap">
+                    <label className="text-xs font-bold uppercase tracking-wider text-indigo-900 flex items-center gap-1.5">
+                      <Award size={14} className="text-indigo-600" />
+                      Data da Promoção / Última Alteração do Cargo
+                    </label>
+                    <div className="flex items-center gap-1.5">
+                      {!formData.promotionDate && editingEmployee?.updatedAt && (
+                        <button
+                          type="button"
+                          onClick={() => {
+                            const fallbackDate = editingEmployee.updatedAt!.split('T')[0];
+                            setFormData(prev => ({ ...prev, promotionDate: fallbackDate }));
+                            setManualPromoDateEdited(true);
+                          }}
+                          className="text-[10px] font-bold text-indigo-600 hover:text-indigo-800 bg-white px-2 py-0.5 rounded-md border border-indigo-200 transition-colors"
+                        >
+                          Usar últ. edição ({formatBRDate(editingEmployee.updatedAt)})
+                        </button>
+                      )}
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setFormData(prev => ({ ...prev, promotionDate: getTodaySaoPaulo() }));
+                          setManualPromoDateEdited(true);
+                          setAutoDateReason(false);
+                        }}
+                        className="text-[10px] font-bold text-indigo-600 hover:text-indigo-800 bg-white px-2 py-0.5 rounded-md border border-indigo-200 transition-colors"
+                      >
+                        Hoje
+                      </button>
+                    </div>
+                  </div>
+                  <input 
+                    type="date"
+                    value={formData.promotionDate}
+                    onChange={e => {
+                      setFormData({ ...formData, promotionDate: e.target.value });
+                      setManualPromoDateEdited(true);
+                      setAutoDateReason(false);
+                    }}
+                    className="w-full rounded-xl border border-indigo-200 bg-white px-4 py-2 text-sm focus:border-indigo-500 focus:outline-none focus:ring-4 focus:ring-indigo-500/10 transition-all font-bold text-zinc-900"
+                  />
+                  {autoDateReason && (
+                    <p className="text-[11px] font-semibold text-indigo-700">
+                      ✓ Cargo/nível alterado — data preenchida automaticamente para hoje (ajuste se necessário).
+                    </p>
+                  )}
+                </div>
+              </div>
+
+              {/* Promotion History Timeline */}
+              <div className="pt-2 border-t border-indigo-100/80 space-y-2">
+                <div className="flex items-center justify-between">
+                  <span className="text-[11px] font-extrabold uppercase tracking-wider text-zinc-500 flex items-center gap-1.5">
+                    <History size={12} className="text-indigo-500" />
+                    Histórico de Promoções (Trainee → Júnior → Pleno → Sênior)
+                  </span>
+                  {!readOnly && (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setNewHistoryEntry({ date: '', role: formData.role, level: '' });
+                        setIsAddingHistory(!isAddingHistory);
+                      }}
+                      className="text-[11px] font-bold text-indigo-600 hover:text-indigo-800 flex items-center gap-1"
+                    >
+                      <Plus size={12} />
+                      {isAddingHistory ? 'Fechar' : 'Registrar data anterior'}
+                    </button>
+                  )}
+                </div>
+
+                {isAddingHistory && (
+                  <div className="p-3 bg-white rounded-xl border border-indigo-200 space-y-2.5">
+                    <p className="text-[11px] font-bold text-zinc-600">
+                      Adicione uma data anterior (ex: dia em que virou Trainee, Júnior ou Pleno):
+                    </p>
+                    <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
+                      <input
+                        type="date"
+                        value={newHistoryEntry.date}
+                        onChange={e => setNewHistoryEntry({ ...newHistoryEntry, date: e.target.value })}
+                        className="rounded-lg border border-zinc-200 bg-zinc-50 px-2.5 py-1.5 text-xs font-bold"
+                      />
+                      <select
+                        value={newHistoryEntry.level}
+                        onChange={e => setNewHistoryEntry({ ...newHistoryEntry, level: e.target.value })}
+                        className="rounded-lg border border-zinc-200 bg-zinc-50 px-2.5 py-1.5 text-xs font-bold"
+                      >
+                        <option value="">Nível...</option>
+                        <option value="Trainee">Trainee</option>
+                        <option value="Júnior">Júnior</option>
+                        <option value="Pleno">Pleno</option>
+                        <option value="Sênior">Sênior</option>
+                      </select>
+                      <input
+                        type="text"
+                        placeholder="Cargo (opcional)"
+                        value={newHistoryEntry.role || ''}
+                        onChange={e => setNewHistoryEntry({ ...newHistoryEntry, role: e.target.value })}
+                        className="rounded-lg border border-zinc-200 bg-zinc-50 px-2.5 py-1.5 text-xs font-medium"
+                      />
+                    </div>
+                    <div className="flex justify-end gap-2">
+                      <button
+                        type="button"
+                        onClick={() => setIsAddingHistory(false)}
+                        className="px-2.5 py-1 text-[11px] font-bold text-zinc-500 hover:text-zinc-800"
+                      >
+                        Cancelar
+                      </button>
+                      <button
+                        type="button"
+                        onClick={handleAddHistoryEntry}
+                        disabled={!newHistoryEntry.date || (!newHistoryEntry.level && !newHistoryEntry.role)}
+                        className="px-3 py-1 rounded-lg bg-indigo-600 text-white text-[11px] font-bold hover:bg-indigo-700 disabled:opacity-40"
+                      >
+                        Adicionar Marco
+                      </button>
+                    </div>
+                  </div>
+                )}
+
+                {formData.promotionHistory.length > 0 ? (
+                  <div className="flex flex-wrap gap-1.5">
+                    {formData.promotionHistory.map((item, idx) => (
+                      <div
+                        key={`${item.date}-${item.level}-${idx}`}
+                        className="inline-flex items-center gap-1.5 bg-white border border-indigo-200/80 rounded-lg px-2.5 py-1 text-[11px] font-bold text-zinc-700 shadow-2xs"
+                      >
+                        <Calendar size={11} className="text-indigo-500" />
+                        <span className="text-indigo-700">{formatBRDate(item.date)}</span>
+                        <span className="text-zinc-300">•</span>
+                        <span>{item.level || item.role}</span>
+                        {item.level && item.role && (
+                          <span className="text-[10px] font-medium text-zinc-400">({item.role})</span>
+                        )}
+                        {!readOnly && (
+                          <button
+                            type="button"
+                            onClick={() => handleRemoveHistoryEntry(idx)}
+                            className="ml-0.5 text-zinc-300 hover:text-red-500 transition-colors"
+                            title="Remover do histórico"
+                          >
+                            <X size={11} />
+                          </button>
+                        )}
+                      </div>
+                    ))}
+                  </div>
+                ) : (
+                  <p className="text-[11px] text-zinc-400 font-medium italic">
+                    As próximas promoções e datas preenchidas ficarão salvas automaticamente aqui.
+                  </p>
+                )}
               </div>
             </div>
 

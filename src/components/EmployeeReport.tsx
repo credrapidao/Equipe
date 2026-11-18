@@ -875,6 +875,11 @@ export function EmployeeReport({
                                 Admissão: {formatBRDate(item.employee.admissionDate)}
                               </div>
                             )}
+                            {(item.employee.promotionDate || item.employee.updatedAt) && (
+                              <div className="text-[10px] text-indigo-600 font-semibold">
+                                {item.employee.promotionDate ? 'Alt. Cargo / Promoção:' : 'Últ. alteração:'} {formatBRDate(item.employee.promotionDate || item.employee.updatedAt)}
+                              </div>
+                            )}
                           </td>
 
                           <td className="px-6 py-4.5 font-mono text-zinc-500 font-semibold">
